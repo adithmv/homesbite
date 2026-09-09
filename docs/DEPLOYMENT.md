@@ -2,7 +2,7 @@
 
 ## 1. Provision Supabase
 
-Create a project in your own Supabase account and choose the desired region. Retain its database password securely. In SQL Editor, run `supabase/migrations/001_homebite.sql` once against the new project. The migration must run as the project database owner; do not run it under an application user. It creates the schema, row-level policies, role-safe signup trigger, mutation functions, audit log and Realtime publication entries.
+Create a project in your own Supabase account and choose the desired region. Retain its database password securely. In SQL Editor, run `supabase/migrations/001_homebite.sql` once against the new project, then run `supabase/migrations/002_service_area.sql`. The migration must run as the project database owner; do not run it under an application user. It creates the schema, row-level policies, role-safe signup trigger, mutation functions, audit log and Realtime publication entries.
 
 The production database starts **empty**. The demo kitchens exist only in the local demo module and are not silently seeded into live operations.
 
@@ -79,3 +79,7 @@ Use separate accounts and devices for customer, kitchen, rider, and admin. Verif
 ## Self-hosting
 
 A Node 22+ host can use `npm ci`, `npm run build`, then `npm start`. Put it behind HTTPS and supply the same environment values. Schedule dispatch through a protected external scheduler or database cron. No external account has been provisioned by these instructions.
+
+## Existing installations: service-area upgrade
+
+Run only `supabase/migrations/002_service_area.sql` in SQL Editor, then deploy the updated app. Do not rerun migration 001 on an existing database. The upgrade preserves orders and defaults to the original Bengaluru 12 km area. Open Admin → Service area to change the name, centre and radius. See [service-area guide](SERVICE-AREA.md).

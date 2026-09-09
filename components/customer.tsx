@@ -16,7 +16,7 @@ import { useStore } from './store';
 import { AsyncButton, Back, Empty, Gate, Loading, PageTitle } from './ui';
 import { Quantity } from './discovery';
 import { DeliveryMap, MapMarker } from './map';
-import { DELIVERY_FEE, isActive, labels, money, PILOT_CENTER, timeline } from '@/lib/domain';
+import { DELIVERY_FEE, isActive, labels, money, timeline } from '@/lib/domain';
 import { supabase } from '@/lib/supabase';
 export function CheckoutPage() {
   return (
@@ -28,7 +28,7 @@ export function CheckoutPage() {
 function CheckoutForm() {
   const s = useStore(),
     router = useRouter();
-  const [point, setPoint] = useState(PILOT_CENTER),
+  const [point, setPoint] = useState({ lat: s.serviceArea.lat, lng: s.serviceArea.lng }),
     [confirmed, setConfirmed] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
@@ -155,7 +155,8 @@ function CheckoutForm() {
             }}
           />
           <p className="small muted">
-            Click the map or enter coordinates. Available within 12 km of central Bengaluru.
+            Click the map or enter coordinates. Available within {s.serviceArea.radius_km} km of{' '}
+            {s.serviceArea.name}.
           </p>
           <div className="form-grid">
             <label>

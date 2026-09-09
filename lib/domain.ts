@@ -10,6 +10,7 @@ export type Status =
   | 'cancelled'
   | 'rejected';
 export type Point = { lat: number; lng: number };
+export type ServiceArea = Point & { name: string; radius_km: number };
 export type Profile = { id: string; name: string; phone: string; role: Role };
 export type Restaurant = Point & {
   id: string;
@@ -70,6 +71,7 @@ export type Order = {
   declined_rider_ids: string[];
 };
 export type AppData = {
+  serviceArea: ServiceArea;
   profile: Profile | null;
   restaurants: Restaurant[];
   menu: MenuItem[];
@@ -88,6 +90,32 @@ export type Checkout = Point & {
 export const DELIVERY_FEE = 3500; // integer paise throughout
 export const PILOT_CENTER: Point = { lat: 12.9716, lng: 77.5946 };
 export const SERVICE_RADIUS_KM = 12;
+export const DEFAULT_SERVICE_AREA: ServiceArea = {
+  ...PILOT_CENTER,
+  name: 'Bengaluru',
+  radius_km: SERVICE_RADIUS_KM,
+};
+export function inServiceArea(point: Point, area: ServiceArea) {
+  return (
+    Number.isFinite(point.lat) &&
+    Number.isFinite(point.lng) &&
+    Math.abs(point.lat) <= 90 &&
+    Math.abs(point.lng) <= 180 &&
+    distance(point, area) <= area.radius_km
+  );
+}
+export function validateServiceArea(area: ServiceArea) {
+  if (
+    !area.name.trim() ||
+    area.name.trim().length > 80 ||
+    ![area.lat, area.lng, area.radius_km].every(Number.isFinite) ||
+    Math.abs(area.lat) > 90 ||
+    Math.abs(area.lng) > 180 ||
+    area.radius_km < 1 ||
+    area.radius_km > 100
+  )
+    throw new Error('Enter an area name, valid coordinates, and a radius between 1 and 100 km.');
+}
 export const money = (paise: number) =>
   new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -125,18 +153,22 @@ export function distance(a: Point, b: Point) {
     Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
 }
-export function validateCheckout(input: Checkout, restaurant: Restaurant, menu: MenuItem[]) {
+export function validateCheckout(
+  input: Checkout,
+  restaurant: Restaurant,
+  menu: MenuItem[],
+  area: ServiceArea = DEFAULT_SERVICE_AREA,
+) {
   if (!restaurant.open || !restaurant.approved)
     throw new Error('This kitchen is not accepting orders.');
   if (!input.customer_name.trim() || input.address.trim().length < 10)
     throw new Error('Enter your name and complete delivery address.');
   if (!/^[6-9]\d{9}$/.test(input.phone))
     throw new Error('Enter a valid 10-digit Indian mobile number.');
-  if (
-    ![input.lat, input.lng].every(Number.isFinite) ||
-    distance(input, PILOT_CENTER) > SERVICE_RADIUS_KM
-  )
-    throw new Error('Delivery is available within 12 km of central Bengaluru.');
+  if (!inServiceArea(input, area))
+    throw new Error(`Delivery is available within ${area.radius_km} km of ${area.name}.`);
+  if (!inServiceArea(restaurant, area))
+    throw new Error('This kitchen is outside the current service area.');
   if (
     !input.items.length ||
     input.items.length > 30 ||
@@ -180,6 +212,7 @@ export function nearestRider(
   orders: Order[],
   excluded: string[] = [],
   now = Date.now(),
+  radiusKm = SERVICE_RADIUS_KM,
 ) {
   return riders
     .filter(
@@ -188,7 +221,7 @@ export function nearestRider(
         r.approved &&
         !excluded.includes(r.id) &&
         now - new Date(r.location_updated_at).getTime() < 5 * 60_000 &&
-        distance(restaurant, r) <= SERVICE_RADIUS_KM &&
+        distance(restaurant, r) <= radiusKm &&
         !orders.some((o) => o.rider_id === r.id && isActive(o)),
     )
     .sort(

@@ -1,4 +1,4 @@
-import type { AppData } from './domain';
+import { inServiceArea, type AppData } from './domain';
 export function readCatalog(data: AppData, input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     throw new Error('Expected an object.');
@@ -11,7 +11,7 @@ export function readCatalog(data: AppData, input: unknown) {
   const query = (value.query as string | undefined)?.trim().toLowerCase() || '';
   if (query.length > 200) throw new Error('Search is too long.');
   return data.restaurants
-    .filter((r) => r.approved)
+    .filter((r) => r.approved && inServiceArea(r, data.serviceArea))
     .map((r) => ({
       id: r.id,
       name: r.name,

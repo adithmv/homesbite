@@ -1,7 +1,8 @@
-import { AppData } from './domain';
+import { AppData, DEFAULT_SERVICE_AREA } from './domain';
 export const FOOD_IMAGE = '/food.jpg';
 export function demoData(): AppData {
   return {
+    serviceArea: { ...DEFAULT_SERVICE_AREA },
     profile: { id: 'customer-demo', role: 'customer', name: 'Alex', phone: '9876543210' },
     restaurants: [
       {

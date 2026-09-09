@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react';
 import type { Map as LeafletMap, LayerGroup } from 'leaflet';
 import { Point } from '@/lib/domain';
-export type MapMarker = Point & { label: string; color?: string };
+export type MapMarker = Point & { label: string; color?: string; radiusKm?: number };
 export function DeliveryMap({
   markers,
   onSelect,
@@ -42,7 +42,20 @@ export function DeliveryMap({
         })
           .bindTooltip(tip)
           .addTo(layer.current);
+        if (m.radiusKm)
+          L.circle([m.lat, m.lng], {
+            radius: m.radiusKm * 1000,
+            color: '#146b47',
+            weight: 2,
+            fillOpacity: 0.1,
+          }).addTo(layer.current);
       }
+      const area = currentMarkers.current.find((m) => m.radiusKm);
+      if (area?.radiusKm)
+        map.current.fitBounds(
+          L.circle([area.lat, area.lng], { radius: area.radiusKm * 1000 }).getBounds(),
+          { padding: [20, 20] },
+        );
       map.current.on('click', (e) => callback.current?.({ lat: e.latlng.lat, lng: e.latlng.lng }));
       if (currentMarkers.current.length > 1)
         map.current.fitBounds(
@@ -75,11 +88,24 @@ export function DeliveryMap({
         })
           .bindTooltip(tip)
           .addTo(layer.current);
+        if (m.radiusKm)
+          L.circle([m.lat, m.lng], {
+            radius: m.radiusKm * 1000,
+            color: '#146b47',
+            weight: 2,
+            fillOpacity: 0.1,
+          }).addTo(layer.current);
       }
       if (nextMarkers.length)
         map.current.fitBounds(
           L.latLngBounds(nextMarkers.map((m) => [m.lat, m.lng] as [number, number])),
           { padding: [35, 35], maxZoom: 15 },
+        );
+      const area = nextMarkers.find((m) => m.radiusKm);
+      if (area?.radiusKm)
+        map.current.fitBounds(
+          L.circle([area.lat, area.lng], { radius: area.radiusKm * 1000 }).getBounds(),
+          { padding: [20, 20] },
         );
     });
   }, [markerKey]);

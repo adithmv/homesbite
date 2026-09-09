@@ -10,6 +10,10 @@ import {
 } from 'react';
 import {
   AppData,
+  ServiceArea,
+  DEFAULT_SERVICE_AREA,
+  validateServiceArea,
+  inServiceArea,
   CartLine,
   Checkout,
   MenuItem,
@@ -47,12 +51,20 @@ type Store = AppData & {
   setOnline: (online: boolean, point?: { lat: number; lng: number }) => Promise<void>;
   approve: (kind: 'restaurant' | 'rider', id: string, approved: boolean) => Promise<void>;
   dispatch: () => Promise<void>;
+  saveServiceArea: (area: ServiceArea) => Promise<void>;
   signOut: () => Promise<void>;
 };
 const Context = createContext<Store | null>(null);
 const DATA_KEY = 'homebite-demo-v1';
 const CART_KEY = supabase ? 'homebite-live-cart-v1' : 'homebite-demo-cart-v1';
-const empty: AppData = { profile: null, restaurants: [], menu: [], riders: [], orders: [] };
+const empty: AppData = {
+  serviceArea: DEFAULT_SERVICE_AREA,
+  profile: null,
+  restaurants: [],
+  menu: [],
+  riders: [],
+  orders: [],
+};
 const uid = () => crypto.randomUUID();
 
 function assign(data: AppData): AppData {
@@ -77,7 +89,14 @@ function assign(data: AppData): AppData {
   for (const order of orders.filter((o) => o.status === 'ready_for_pickup')) {
     const restaurant = data.restaurants.find((r) => r.id === order.restaurant_id);
     if (!restaurant) continue;
-    const rider = nearestRider(restaurant, data.riders, orders, order.declined_rider_ids);
+    const rider = nearestRider(
+      restaurant,
+      data.riders,
+      orders,
+      order.declined_rider_ids,
+      now,
+      data.serviceArea.radius_km,
+    );
     if (rider)
       Object.assign(order, {
         status: 'rider_assigned',
@@ -105,6 +124,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [data]);
   const commit = useCallback(
     (next: AppData) => {
+      next = { ...next, serviceArea: next.serviceArea || { ...DEFAULT_SERVICE_AREA } };
       dataRef.current = next;
       setData(next);
       if (demo) localStorage.setItem(DATA_KEY, JSON.stringify(next));
@@ -131,15 +151,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               .select('*,items:order_items(menu_item_id,name,quantity,price)')
               .order('created_at', { ascending: false })
           : Promise.resolve({ data: [], error: null }),
+        supabase.from('service_area').select('name,lat,lng,radius_km').eq('id', 1).single(),
       ]);
       if (generation !== refreshGeneration.current) return;
-      const failed = results.find((r) => r.error);
+      // During a rolling upgrade, an unmigrated database still enforces the original area.
+      const areaMigrationPending = ['PGRST205', '42P01'].includes(results[5].error?.code || '');
+      const failed = results.find((r, index) => r.error && !(index === 5 && areaMigrationPending));
       if (failed?.error) {
-        setError(failed.error.message);
+        setError(
+          results[5].error
+            ? 'Service area settings are unavailable. Run the 002_service_area.sql update in Supabase, then refresh.'
+            : failed.error.message,
+        );
         setLoading(false);
         return;
       }
       const next = {
+        serviceArea: areaMigrationPending ? { ...DEFAULT_SERVICE_AREA } : results[5].data,
         profile: results[0].data,
         restaurants: results[1].data ?? [],
         menu: results[2].data ?? [],
@@ -171,7 +199,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const sync = (e: StorageEvent) => {
         if (e.key === DATA_KEY && e.newValue) {
           try {
-            setData(JSON.parse(e.newValue));
+            const incoming = JSON.parse(e.newValue);
+            setData({
+              ...incoming,
+              serviceArea: incoming.serviceArea || { ...DEFAULT_SERVICE_AREA },
+            });
           } catch {
             /* ignore corrupt storage */
           }
@@ -299,7 +331,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         throw new Error('Sign in as a customer to place your order.');
       const restaurant = data.restaurants.find((r) => r.id === input.restaurant_id);
       if (!restaurant) throw new Error('Kitchen not found.');
-      const items = validateCheckout({ ...input, items: cart }, restaurant, data.menu);
+      const items = validateCheckout(
+        { ...input, items: cart },
+        restaurant,
+        data.menu,
+        data.serviceArea,
+      );
       let id: string;
       if (!demo) id = await rpc('place_order', { payload: { ...input, items: cart } });
       else {
@@ -396,6 +433,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (data.profile?.role !== 'restaurant') throw new Error('Restaurant account required.');
+      if (!inServiceArea(values as Restaurant, data.serviceArea))
+        throw new Error('Kitchen must be inside the configured service area.');
       commit({
         ...data,
         restaurants: data.restaurants.map((r) =>
@@ -466,6 +505,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
           : { ...data, riders: data.riders.map((r) => (r.id === id ? { ...r, approved } : r)) },
       );
+    },
+    async saveServiceArea(area) {
+      if (dataRef.current.profile?.role !== 'admin')
+        throw new Error('Administrator access required.');
+      validateServiceArea(area);
+      const values = { ...area, name: area.name.trim() };
+      if (!demo) {
+        try {
+          await rpc('save_service_area', { payload: values });
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('save_service_area'))
+            throw new Error(
+              'Run 002_service_area.sql in your Supabase SQL Editor to enable this setting, then refresh.',
+            );
+          throw error;
+        }
+        return;
+      }
+      commit({ ...dataRef.current, serviceArea: values });
     },
     async dispatch() {
       if (!demo) {

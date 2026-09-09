@@ -5,7 +5,7 @@ import { useStore } from './store';
 import { AsyncButton, Empty, Gate, PageTitle } from './ui';
 import { Stat, OrderTable } from './restaurant';
 import { DeliveryMap } from './map';
-import { isActive, money, PILOT_CENTER } from '@/lib/domain';
+import { isActive, money } from '@/lib/domain';
 export function RiderDashboard() {
   return (
     <Gate role="rider">
@@ -45,7 +45,10 @@ function RiderWorkspace() {
   useEffect(() => {
     if (!rider?.online || !rider.approved) return;
     if (s.demo) {
-      const tick = () => void updateLocation.current(true, PILOT_CENTER).catch(() => {});
+      const tick = () =>
+        void updateLocation
+          .current(true, { lat: s.serviceArea.lat, lng: s.serviceArea.lng })
+          .catch(() => {});
       tick();
       const timer = setInterval(tick, 60000);
       return () => clearInterval(timer);
@@ -76,14 +79,14 @@ function RiderWorkspace() {
       stopped = true;
       navigator.geolocation.clearWatch(watch);
     };
-  }, [rider?.online, rider?.approved, s.demo, rider?.id]);
+  }, [rider?.online, rider?.approved, s.demo, rider?.id, s.serviceArea.lat, s.serviceArea.lng]);
   async function toggle() {
     if (rider?.online) {
       await s.setOnline(false);
       return;
     }
     if (s.demo) {
-      await s.setOnline(true, PILOT_CENTER);
+      await s.setOnline(true, { lat: s.serviceArea.lat, lng: s.serviceArea.lng });
       return;
     }
     const p = await new Promise<GeolocationPosition>((resolve, reject) =>
@@ -101,7 +104,7 @@ function RiderWorkspace() {
       ? Math.max(0, 60 - Math.floor((now - Date.parse(job.assigned_at)) / 1000))
       : 0;
   const mapsUrl = (lat: number, lng: number) =>
-    `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${rider?.lat || PILOT_CENTER.lat}%2C${rider?.lng || PILOT_CENTER.lng}%3B${lat}%2C${lng}`;
+    `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${rider?.lat || s.serviceArea.lat}%2C${rider?.lng || s.serviceArea.lng}%3B${lat}%2C${lng}`;
   return (
     <div className="page dashboard-page">
       <PageTitle

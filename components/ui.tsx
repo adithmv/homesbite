@@ -70,7 +70,7 @@ export function Shell({ children }: { children: ReactNode }) {
               <div>
                 <small>DELIVERING IN</small>
                 <strong>
-                  Bengaluru <ChevronDown size={13} />
+                  {s.serviceArea.name} <ChevronDown size={13} />
                 </strong>
               </div>
             </div>
@@ -159,7 +159,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <Link href="/policies">Policies & support</Link>
         </div>
         <span>
-          Made for Bengaluru.
+          Made for {s.serviceArea.name}.
           <br />
           Cash on delivery, always clear.
         </span>

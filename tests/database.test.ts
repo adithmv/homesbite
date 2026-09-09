@@ -67,10 +67,16 @@ beforeAll(async () => {
     'utf8',
   ).replace('create extension if not exists pgcrypto;', '');
   await db.exec(migration);
+  await db.exec(
+    readFileSync(new URL('../supabase/migrations/002_service_area.sql', import.meta.url), 'utf8'),
+  );
 }, 30000);
 beforeEach(async () => {
   await root();
   await db.exec('truncate auth.users cascade');
+  await db.exec(
+    "update public.service_area set name='Bengaluru',lat=12.9716,lng=77.5946,radius_km=12 where id=1",
+  );
   for (const [key, id] of Object.entries(ids)) {
     const role =
       key === 'owner' || key === 'otherOwner'
@@ -293,5 +299,88 @@ describe('Production database order flow', () => {
     expect(await rows('rider_locations')).toHaveLength(0);
     await user(ids.otherOwner);
     expect(await rows('rider_locations')).toHaveLength(0);
+  });
+});
+
+describe('Admin-configured service area', () => {
+  it('allows public reads but restricts writes to the admin RPC', async () => {
+    await user(null);
+    expect((await rows('service_area'))[0].radius_km).toBe(12);
+    for (const actor of [ids.customer, ids.owner, ids.rider]) {
+      await user(actor);
+      await expect(
+        rpc('save_service_area', [{ name: 'Kochi', lat: 9.9312, lng: 76.2673, radius_km: 15 }]),
+      ).rejects.toThrow('Administrator');
+      await expect(db.exec('update public.service_area set radius_km=99')).rejects.toThrow(
+        'permission denied',
+      );
+    }
+    await user(ids.admin);
+    await rpc('save_service_area', [{ name: 'Kochi', lat: 9.9312, lng: 76.2673, radius_km: 15 }]);
+    expect((await rows('service_area'))[0].name).toBe('Kochi');
+  });
+  it('enforces changed boundaries for checkout and kitchen profiles without altering existing orders', async () => {
+    const order = await place();
+    await user(ids.admin);
+    await rpc('save_service_area', [{ name: 'Kochi', lat: 9.9312, lng: 76.2673, radius_km: 15 }]);
+    expect((await rows('orders'))[0].id).toBe(order);
+    expect((await rows('orders'))[0].status).toBe('placed');
+    await user(ids.other);
+    await expect(rpc('place_order', [payload()])).rejects.toThrow('configured delivery area');
+    await expect(rpc('place_order', [{ ...payload(), lat: 9.9312, lng: 76.2673 }])).rejects.toThrow(
+      'Kitchen is outside',
+    );
+    await user(ids.owner);
+    const original = (await rows('restaurants'))[0];
+    await expect(rpc('save_restaurant', [original])).rejects.toThrow('configured service area');
+    await rpc('save_restaurant', [
+      { ...original, lat: 9.9312, lng: 76.2673, address: 'Test Kitchen, Kochi, Kerala' },
+    ]);
+    await user(ids.other);
+    await rpc('place_order', [{ ...payload(), lat: 9.9312, lng: 76.2673 }]);
+    expect(await rows('orders')).toHaveLength(1);
+  });
+  it('rejects invalid bounds and preserves the previous configuration', async () => {
+    await user(ids.admin);
+    const good = { name: 'Kochi', lat: 9.9312, lng: 76.2673, radius_km: 15 };
+    for (const bad of [
+      { ...good, radius_km: 0 },
+      { ...good, radius_km: 101 },
+      { ...good, radius_km: null },
+      { ...good, lat: 91 },
+      { ...good, lng: 181 },
+      { ...good, name: ' ' },
+      { ...good, lat: 'NaN' },
+    ])
+      await expect(rpc('save_service_area', [bad])).rejects.toThrow();
+    expect((await rows('service_area'))[0].name).toBe('Bengaluru');
+  });
+  it('uses the configured radius for rider matching', async () => {
+    await user(ids.rider);
+    await rpc('update_rider', [true, 13.15, 77.6]);
+    await user(ids.rider2);
+    await rpc('update_rider', [false, null, null]);
+    const id = await place();
+    await ready(id);
+    await user(ids.admin);
+    expect((await rows('orders'))[0].status).toBe('ready_for_pickup');
+    await rpc('save_service_area', [
+      { name: 'Bengaluru', lat: 12.9716, lng: 77.5946, radius_km: 30 },
+    ]);
+    await rpc('dispatch_orders');
+    expect((await rows('orders'))[0].rider_id).toBe(ids.rider);
+  });
+  it('can rerun the upgrade without resetting settings or orders', async () => {
+    const id = await place();
+    await user(ids.admin);
+    await rpc('save_service_area', [
+      { name: 'Expanded', lat: 12.9716, lng: 77.5946, radius_km: 25 },
+    ]);
+    await root();
+    await db.exec(
+      readFileSync(new URL('../supabase/migrations/002_service_area.sql', import.meta.url), 'utf8'),
+    );
+    expect((await rows('service_area'))[0].radius_km).toBe(25);
+    expect((await rows('orders'))[0].id).toBe(id);
   });
 });

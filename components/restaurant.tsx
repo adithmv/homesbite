@@ -15,16 +15,7 @@ import {
 } from 'lucide-react';
 import { useStore } from './store';
 import { AsyncButton, Empty, Gate, PageTitle } from './ui';
-import {
-  isActive,
-  labels,
-  MenuItem,
-  money,
-  Order,
-  PILOT_CENTER,
-  Restaurant,
-  Status,
-} from '@/lib/domain';
+import { isActive, labels, MenuItem, money, Order, Restaurant, Status } from '@/lib/domain';
 export function RestaurantDashboard() {
   return (
     <Gate role="restaurant">
@@ -399,7 +390,7 @@ function KitchenForm({ kitchen }: { kitchen?: Restaurant }) {
             required
             min="-90"
             max="90"
-            defaultValue={kitchen?.lat || PILOT_CENTER.lat}
+            defaultValue={kitchen?.lat ?? s.serviceArea.lat}
           />
         </label>
         <label>
@@ -411,7 +402,7 @@ function KitchenForm({ kitchen }: { kitchen?: Restaurant }) {
             required
             min="-180"
             max="180"
-            defaultValue={kitchen?.lng || PILOT_CENTER.lng}
+            defaultValue={kitchen?.lng ?? s.serviceArea.lng}
           />
         </label>
         <label className="span-2">

@@ -10,6 +10,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { useStore } from './store';
+import { ServiceAreaSettings } from './service-area';
 import { AsyncButton, Gate, PageTitle } from './ui';
 import { Stat, OrderTable } from './restaurant';
 import { isActive, money } from '@/lib/domain';
@@ -109,17 +110,21 @@ function AdminWorkspace() {
         </div>
       )}
       <nav className="dashboard-tabs" aria-label="Admin sections">
-        {['orders', 'restaurants', 'riders'].map((t) => (
+        {['orders', 'restaurants', 'riders', 'service-area'].map((t) => (
           <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
             {t === 'orders'
               ? 'All orders'
               : t === 'restaurants'
                 ? 'Partner kitchens'
-                : 'Delivery partners'}
+                : t === 'riders'
+                  ? 'Delivery partners'
+                  : 'Service area'}
           </button>
         ))}
       </nav>
-      {tab === 'orders' ? (
+      {tab === 'service-area' ? (
+        <ServiceAreaSettings />
+      ) : tab === 'orders' ? (
         <>
           <div className="section-heading">
             <h2>Order activity</h2>

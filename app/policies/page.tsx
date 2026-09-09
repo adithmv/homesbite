@@ -1,5 +1,8 @@
+'use client';
+import { useStore } from '@/components/store';
 import { Back } from '@/components/ui';
 export default function Policies() {
+  const { serviceArea } = useStore();
   return (
     <div className="page narrow policy-text">
       <Back />
@@ -11,9 +14,10 @@ export default function Policies() {
       </div>
       <h2>Ordering from your neighbourhood</h2>
       <p>
-        HomeBite connects customers with participating kitchens and delivery riders in the Bengaluru
-        pilot area. Delivery is available within 12 km of central Bengaluru. Kitchens control their
-        menus, listed hours, availability, and whether they are accepting orders.
+        HomeBite connects customers with participating kitchens and delivery riders in{' '}
+        {serviceArea.name}. Delivery is available within {serviceArea.radius_km} km of the
+        configured service-area centre. Kitchens control their menus, listed hours, availability,
+        and whether they are accepting orders.
       </p>
       <p>
         The checkout shows the food subtotal and a ₹35 delivery fee. All amounts are in Indian

@@ -7,7 +7,7 @@ import { CatalogTools } from '@/components/catalog-tools';
 export const metadata: Metadata = {
   title: { default: 'HomeBite — Your neighbourhood, on a plate', template: '%s | HomeBite' },
   description:
-    'Discover neighbourhood kitchens in Bengaluru. Freshly prepared meals, transparent prices, and cash on delivery.',
+    'Discover kitchens in your neighbourhood. Freshly prepared meals, transparent prices, and cash on delivery.',
 };
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

@@ -36,11 +36,11 @@ Demo records and role are shared across tabs in the same browser using local sto
 ## Product decisions
 
 - **Brand:** HomeBite. No domain has been purchased.
-- **Launch area:** a 12 km straight-line radius around 12.9716, 77.5946 (central Bengaluru). Kitchen setup and customer delivery pins are validated against it.
+- **Service area:** defaults to a 12 km straight-line radius around 12.9716, 77.5946 (central Bengaluru). Admin → Service area can change the name, centre, and radius (1–100 km). New orders require both kitchen and customer pins inside the saved area.
 - **Payment:** cash on delivery only. ₹35 delivery; no platform commission in this pilot. All money is stored in integer paise.
 - **Identity:** anyone can browse; placing an order requires a confirmed customer account. There is no anonymous/guest checkout.
 - **Partners:** one kitchen per owner; consistent public templates; manual kitchen and rider approval. No self-assigned admin accounts.
-- **Dispatch:** nearest approved online rider within 12 km of the kitchen with a location newer than five minutes and no active delivery. One outstanding offer per rider. Offers expire after 60 seconds; declined/expired riders are excluded for that order.
+- **Dispatch:** nearest approved online rider within the configured service radius of the kitchen with a location newer than five minutes and no active delivery. One outstanding offer per rider. Offers expire after 60 seconds; declined/expired riders are excluded for that order.
 - **No rider:** keep the order ready and visible for operations intervention. No silent auto-cancellation. Matching retries on availability updates, delivery completion, manual retry and scheduled dispatch.
 - **Settlement:** ₹35 accrues to the delivering rider; food value belongs to the kitchen. CSV records are not proof of bank payment.
 - **Hours:** displayed text; the explicit open/pause toggle determines acceptance. Operators must manage it each shift.
@@ -88,3 +88,5 @@ GitHub Actions runs type checking, lint, tests and the production build on pushe
 ## Before a real pilot
 
 Review [launch checklist](docs/LAUNCH-CHECKLIST.md). Replace fictional content with consenting partner kitchens and accurate food photography. The policy page is explicitly a **draft** requiring business identity, verified support contact, data retention and operator review. No staffed support service, legal sign-off, real-world rider recruitment, or production operational validation is implied.
+
+Existing Supabase installations must apply [migration 002](supabase/migrations/002_service_area.sql) to enable [Admin service-area settings](docs/SERVICE-AREA.md). No existing orders are removed.
