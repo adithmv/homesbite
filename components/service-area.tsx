@@ -1,7 +1,7 @@
 'use client';
 import { FormEvent, useState } from 'react';
 import { useStore } from './store';
-import { DeliveryMap } from './map';
+import { LocationPicker } from './location-picker';
 import { inServiceArea, validateServiceArea } from '@/lib/domain';
 export function ServiceAreaSettings() {
   const s = useStore();
@@ -48,22 +48,22 @@ export function ServiceAreaSettings() {
           placeholder="e.g. Kochi"
         />
       </label>
-      {valid && (
-        <DeliveryMap
-          markers={[
-            {
-              lat: area.lat,
-              lng: area.lng,
-              label: area.name || 'Service area centre',
-              radiusKm: area.radius_km,
-            },
-          ]}
-          onSelect={(point) => {
-            setArea({ ...area, ...point });
-            setSaved(false);
-          }}
-        />
-      )}
+      <LocationPicker
+        point={{ lat: area.lat, lng: area.lng }}
+        radiusKm={valid ? area.radius_km : undefined}
+        label={area.name || 'Service area centre'}
+        onSelect={(point) => {
+          setArea((current) => ({ ...current, ...point }));
+          setSaved(false);
+        }}
+        onDetails={(place) =>
+          setArea((current) =>
+            current.lat === place.lat && current.lng === place.lng
+              ? { ...current, name: place.region }
+              : current,
+          )
+        }
+      />
       <div className="form-grid">
         <label>
           Centre latitude

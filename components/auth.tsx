@@ -4,7 +4,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Role } from '@/lib/domain';
+import { Role, inServiceArea, Point } from '@/lib/domain';
+import { LocationPicker } from './location-picker';
+import { Place } from '@/lib/locations';
 import { useStore } from './store';
 import { Back } from './ui';
 export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
@@ -15,6 +17,8 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [message, setMessage] = useState('');
+  const [registrationPoint, setRegistrationPoint] = useState<Point | null>(null);
+  const [registrationPlace, setRegistrationPlace] = useState<Place | null>(null);
   useEffect(() => {
     if (!supabase) return;
     const { data } = supabase.auth.onAuthStateChange((event) => {
@@ -48,6 +52,13 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
         return;
       }
       if (mode === 'signup') {
+        if (
+          role === 'restaurant' &&
+          (!registrationPoint || !inServiceArea(registrationPoint, s.serviceArea))
+        )
+          throw new Error(
+            'Select a kitchen location inside the service area before creating your account.',
+          );
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -58,6 +69,15 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
               phone: String(f.get('phone')),
               role,
               vehicle: String(f.get('vehicle') || 'Bike'),
+              ...(registrationPoint
+                ? {
+                    initial_location: {
+                      ...registrationPoint,
+                      label: registrationPlace?.label || '',
+                      region: registrationPlace?.region || '',
+                    },
+                  }
+                : {}),
             },
           },
         });
@@ -195,6 +215,34 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
                 </label>
               )}
             </>
+          )}
+          {mode === 'signup' && (
+            <div>
+              <h3>
+                {role === 'restaurant' ? 'Kitchen location (required)' : 'Your location (optional)'}
+              </h3>
+              <LocationPicker
+                point={registrationPoint || s.serviceArea}
+                label={role === 'restaurant' ? 'Kitchen pickup' : 'Selected location'}
+                onSelect={(p) => {
+                  setRegistrationPoint(p);
+                  setRegistrationPlace(null);
+                }}
+                onDetails={(place) => setRegistrationPlace(place)}
+              />
+              {registrationPoint && (
+                <p className="small">
+                  Latitude: {registrationPoint.lat.toFixed(6)} · Longitude:{' '}
+                  {registrationPoint.lng.toFixed(6)}
+                </p>
+              )}
+              {role === 'restaurant' && (
+                <p className="small muted">
+                  Choose your actual kitchen pickup location. Delivery is available within{' '}
+                  {s.serviceArea.radius_km} km of {s.serviceArea.name}.
+                </p>
+              )}
+            </div>
           )}
           {mode !== 'new-password' && (
             <label>

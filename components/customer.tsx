@@ -2,20 +2,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  ArrowRight,
-  Check,
-  CheckCircle2,
-  Clock3,
-  LocateFixed,
-  MapPin,
-  Phone,
-  ShieldCheck,
-} from 'lucide-react';
+import { ArrowRight, Check, CheckCircle2, Clock3, MapPin, Phone, ShieldCheck } from 'lucide-react';
 import { useStore } from './store';
 import { AsyncButton, Back, Empty, Gate, Loading, PageTitle } from './ui';
 import { Quantity } from './discovery';
 import { DeliveryMap, MapMarker } from './map';
+import { LocationPicker } from './location-picker';
 import { DELIVERY_FEE, isActive, labels, money, timeline } from '@/lib/domain';
 import { supabase } from '@/lib/supabase';
 export function CheckoutPage() {
@@ -62,21 +54,6 @@ function CheckoutForm() {
       setBusy(false);
     }
   }
-  const locate = () => {
-    setError('');
-    if (!navigator.geolocation) {
-      setError('Location is unavailable. Use the map or coordinates.');
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (p) => {
-        setPoint({ lat: p.coords.latitude, lng: p.coords.longitude });
-        setConfirmed(true);
-      },
-      () => setError('Location access was denied. Select the delivery pin on the map instead.'),
-      { enableHighAccuracy: true, timeout: 15000 },
-    );
-  };
   if (!items.length)
     return (
       <div className="page narrow">
@@ -140,15 +117,10 @@ function CheckoutForm() {
               />
             </label>
           </div>
-          <div className="section-heading">
-            <h3>Set your delivery pin</h3>
-            <button className="text-button" type="button" onClick={locate}>
-              <LocateFixed size={16} />
-              Use my location
-            </button>
-          </div>
-          <DeliveryMap
-            markers={[{ ...point, label: 'Deliver here' }]}
+          <h3>Set your delivery pin</h3>
+          <LocationPicker
+            point={point}
+            label="Deliver here"
             onSelect={(p) => {
               setPoint(p);
               setConfirmed(true);

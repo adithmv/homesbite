@@ -1,6 +1,6 @@
 'use client';
-import { useEffect, useRef } from 'react';
-import type { Map as LeafletMap, LayerGroup } from 'leaflet';
+import { useEffect, useRef, useState } from 'react';
+import type * as Leaflet from 'leaflet';
 import { Point } from '@/lib/domain';
 export type MapMarker = Point & { label: string; color?: string; radiusKm?: number };
 export function DeliveryMap({
@@ -11,75 +11,105 @@ export function DeliveryMap({
   onSelect?: (point: Point) => void;
 }) {
   const element = useRef<HTMLDivElement>(null),
-    map = useRef<LeafletMap | null>(null),
-    layer = useRef<LayerGroup | null>(null);
-  const callback = useRef(onSelect);
-  const currentMarkers = useRef(markers);
+    map = useRef<Leaflet.Map | null>(null),
+    layer = useRef<Leaflet.LayerGroup | null>(null),
+    api = useRef<typeof Leaflet | null>(null),
+    callback = useRef(onSelect);
+  const [ready, setReady] = useState(false),
+    [error, setError] = useState('');
+  const fitted = useRef(false);
   useEffect(() => {
     callback.current = onSelect;
-    currentMarkers.current = markers;
-  }, [onSelect, markers]);
+  }, [onSelect]);
   useEffect(() => {
     let disposed = false;
-    void import('leaflet').then((L) => {
-      if (disposed || !element.current) return;
-      const first = currentMarkers.current[0] || { lat: 12.9716, lng: 77.5946 };
-      map.current = L.map(element.current).setView([first.lat, first.lng], 13);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19,
-      }).addTo(map.current);
-      layer.current = L.layerGroup().addTo(map.current);
-      for (const m of currentMarkers.current) {
-        const tip = document.createElement('span');
-        tip.textContent = m.label;
-        L.circleMarker([m.lat, m.lng], {
-          radius: 9,
-          color: m.color || '#146b47',
-          weight: 3,
-          fillOpacity: 0.8,
-        })
-          .bindTooltip(tip)
-          .addTo(layer.current);
-        if (m.radiusKm)
-          L.circle([m.lat, m.lng], {
-            radius: m.radiusKm * 1000,
-            color: '#146b47',
-            weight: 2,
-            fillOpacity: 0.1,
-          }).addTo(layer.current);
-      }
-      const area = currentMarkers.current.find((m) => m.radiusKm);
-      if (area?.radiusKm)
-        map.current.fitBounds(
-          L.circle([area.lat, area.lng], { radius: area.radiusKm * 1000 }).getBounds(),
-          { padding: [20, 20] },
+    let observer: ResizeObserver | undefined;
+    void import('leaflet')
+      .then((L) => {
+        if (disposed || !element.current) return;
+        api.current = L;
+        const instance = L.map(element.current, { scrollWheelZoom: false }).setView(
+          [12.9716, 77.5946],
+          12,
         );
-      map.current.on('click', (e) => callback.current?.({ lat: e.latlng.lat, lng: e.latlng.lng }));
-      if (currentMarkers.current.length > 1)
-        map.current.fitBounds(
-          L.latLngBounds(currentMarkers.current.map((m) => [m.lat, m.lng] as [number, number])),
-          { padding: [35, 35], maxZoom: 15 },
+        map.current = instance;
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          maxZoom: 19,
+        }).addTo(instance);
+        layer.current = L.layerGroup().addTo(instance);
+        instance.on('click', (event) =>
+          callback.current?.({ lat: event.latlng.lat, lng: event.latlng.lng }),
         );
-    });
+        if (typeof ResizeObserver !== 'undefined') {
+          observer = new ResizeObserver(() => instance.invalidateSize({ pan: false }));
+          observer.observe(element.current);
+        }
+        setReady(true);
+      })
+      .catch(() => {
+        if (!disposed)
+          setError(
+            'Map could not load. Use place search, current location, or the coordinate fields.',
+          );
+      });
     return () => {
       disposed = true;
+      observer?.disconnect();
       map.current?.remove();
       map.current = null;
       layer.current = null;
+      fitted.current = false;
     };
   }, []);
-  const markerKey = JSON.stringify(markers);
+  const markerKey = JSON.stringify(markers),
+    selectable = !!onSelect;
   useEffect(() => {
-    const nextMarkers = JSON.parse(markerKey) as MapMarker[];
-    if (!map.current || !layer.current) return;
-    void import('leaflet').then((L) => {
-      if (!map.current || !layer.current) return;
-      layer.current.clearLayers();
-      for (const m of nextMarkers) {
-        const tip = document.createElement('span');
-        tip.textContent = m.label;
+    const L = api.current,
+      instance = map.current,
+      group = layer.current;
+    if (!ready || !L || !instance || !group) return;
+    const points = (JSON.parse(markerKey) as MapMarker[]).filter(
+      (m) =>
+        Number.isFinite(m.lat) &&
+        Number.isFinite(m.lng) &&
+        Math.abs(m.lat) <= 90 &&
+        Math.abs(m.lng) <= 180,
+    );
+    group.clearLayers();
+    let areaBounds: Leaflet.LatLngBounds | undefined;
+    for (const m of points) {
+      // Coverage overlays must not intercept taps intended to select a new location.
+      if (m.radiusKm) {
+        const circle = L.circle([m.lat, m.lng], {
+          radius: m.radiusKm * 1000,
+          color: '#146b47',
+          weight: 2,
+          fillOpacity: 0.1,
+          interactive: false,
+        }).addTo(group);
+        areaBounds = circle.getBounds();
+      }
+      const tip = document.createElement('span');
+      tip.textContent = m.label;
+      if (selectable) {
+        const pin = L.marker([m.lat, m.lng], {
+          draggable: true,
+          icon: L.divIcon({
+            className: 'location-pin',
+            html: '<span></span>',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          }),
+        })
+          .bindTooltip(tip)
+          .addTo(group);
+        pin.on('dragend', () => {
+          const p = pin.getLatLng();
+          callback.current?.({ lat: p.lat, lng: p.lng });
+        });
+      } else
         L.circleMarker([m.lat, m.lng], {
           radius: 9,
           color: m.color || '#146b47',
@@ -87,37 +117,47 @@ export function DeliveryMap({
           fillOpacity: 0.8,
         })
           .bindTooltip(tip)
-          .addTo(layer.current);
-        if (m.radiusKm)
-          L.circle([m.lat, m.lng], {
-            radius: m.radiusKm * 1000,
-            color: '#146b47',
-            weight: 2,
-            fillOpacity: 0.1,
-          }).addTo(layer.current);
-      }
-      if (nextMarkers.length)
-        map.current.fitBounds(
-          L.latLngBounds(nextMarkers.map((m) => [m.lat, m.lng] as [number, number])),
-          { padding: [35, 35], maxZoom: 15 },
-        );
-      const area = nextMarkers.find((m) => m.radiusKm);
-      if (area?.radiusKm)
-        map.current.fitBounds(
-          L.circle([area.lat, area.lng], { radius: area.radiusKm * 1000 }).getBounds(),
-          { padding: [20, 20] },
-        );
-    });
-  }, [markerKey]);
+          .addTo(group);
+    }
+    if (!points.length) return;
+    if (!fitted.current && areaBounds) instance.fitBounds(areaBounds, { padding: [20, 20] });
+    else if (points.length > 1)
+      instance.fitBounds(L.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number])), {
+        padding: [35, 35],
+        maxZoom: 15,
+      });
+    else if (!fitted.current) instance.setView([points[0].lat, points[0].lng], 15);
+    else if (!instance.getBounds().contains([points[0].lat, points[0].lng]))
+      instance.panTo([points[0].lat, points[0].lng]);
+    fitted.current = true;
+  }, [markerKey, ready, selectable]);
   return (
-    <div
-      className="delivery-map"
-      ref={element}
-      aria-label={
-        onSelect
-          ? 'Delivery location map. Click to select, or use the coordinate fields below.'
-          : 'Pickup, delivery, and available rider locations'
-      }
-    />
+    <div>
+      {error && (
+        <p role="alert" className="field-error">
+          {error}
+        </p>
+      )}
+      <div
+        className="delivery-map"
+        ref={element}
+        aria-label={
+          selectable ? 'Location map: click to select or drag the pin' : 'Delivery locations map'
+        }
+      />
+      {selectable && (
+        <button
+          className="button secondary small"
+          type="button"
+          disabled={!ready}
+          onClick={() => {
+            const p = map.current?.getCenter();
+            if (p) callback.current?.({ lat: p.lat, lng: p.lng });
+          }}
+        >
+          Use centre of map
+        </button>
+      )}
+    </div>
   );
 }

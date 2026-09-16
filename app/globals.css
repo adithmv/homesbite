@@ -2132,3 +2132,70 @@ td a {
 .auth-back a {
   text-decoration: underline;
 }
+.location-picker {
+  margin: 16px 0 24px;
+}
+.location-search {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.location-search label {
+  flex: 1;
+  min-width: 220px;
+  margin: 0;
+}
+.location-search .button {
+  margin: 0;
+}
+.location-results {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.location-results button {
+  display: block;
+  text-align: left;
+  padding: 12px 16px;
+  width: 100%;
+  background: white;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+.location-results button:hover {
+  background: var(--green-light);
+}
+.location-picker .delivery-map {
+  height: 340px;
+}
+.location-picker > p {
+  margin-top: 10px;
+}
+.location-pin span {
+  display: block;
+  height: 24px;
+  width: 24px;
+  border: 4px solid white;
+  background: var(--green);
+  border-radius: 50%;
+  box-shadow: 0 1px 8px #0008;
+}
+.location-pin {
+  cursor: grab;
+}
+@media (max-width: 570px) {
+  .location-search label {
+    flex-basis: 100%;
+  }
+  .location-search .button {
+    flex: 1;
+  }
+  .location-picker .delivery-map {
+    height: 300px;
+  }
+}

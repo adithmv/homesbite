@@ -1,5 +1,5 @@
 'use client';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import {
   CheckCircle2,
   ChefHat,
@@ -14,6 +14,8 @@ import {
   X,
 } from 'lucide-react';
 import { useStore } from './store';
+import { LocationPicker } from './location-picker';
+import { supabase } from '@/lib/supabase';
 import { AsyncButton, Empty, Gate, PageTitle } from './ui';
 import { isActive, labels, MenuItem, money, Order, Restaurant, Status } from '@/lib/domain';
 export function RestaurantDashboard() {
@@ -303,12 +305,44 @@ function KitchenForm({ kitchen }: { kitchen?: Restaurant }) {
   const s = useStore(),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
+  const [point, setPoint] = useState({
+    lat: kitchen?.lat ?? s.serviceArea.lat,
+    lng: kitchen?.lng ?? s.serviceArea.lng,
+  });
+  const [selected, setSelected] = useState(!!kitchen);
+  const [address, setAddress] = useState(kitchen?.address || '');
+  useEffect(() => {
+    if (kitchen || !supabase) return;
+    let cancelled = false;
+    void supabase.auth.getUser().then(({ data }) => {
+      const p = data.user?.user_metadata?.initial_location;
+      if (
+        !cancelled &&
+        p &&
+        Number.isFinite(p.lat) &&
+        Number.isFinite(p.lng) &&
+        Math.abs(p.lat) <= 90 &&
+        Math.abs(p.lng) <= 180
+      ) {
+        setPoint({ lat: p.lat, lng: p.lng });
+        setSelected(true);
+        setAddress(typeof p.label === 'string' ? p.label.slice(0, 500) : '');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [kitchen]);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError('');
     setBusy(true);
     const f = new FormData(e.currentTarget);
     try {
+      if (!selected)
+        throw new Error(
+          'Select your kitchen location on the map or use location detection before saving.',
+        );
       await s.saveRestaurant({
         ...kitchen,
         name: String(f.get('name')),
@@ -318,8 +352,7 @@ function KitchenForm({ kitchen }: { kitchen?: Restaurant }) {
         address: String(f.get('address')),
         hours: String(f.get('hours')),
         image: String(f.get('image')),
-        lat: Number(f.get('lat')),
-        lng: Number(f.get('lng')),
+        ...point,
         eta: Number(f.get('eta')),
         open: kitchen?.open || false,
       });
@@ -375,12 +408,36 @@ function KitchenForm({ kitchen }: { kitchen?: Restaurant }) {
           Full kitchen address
           <textarea
             name="address"
-            defaultValue={kitchen?.address}
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
             required
             minLength={10}
             maxLength={500}
           />
         </label>
+        <div className="span-2">
+          <h3>Kitchen location (required)</h3>
+          <LocationPicker
+            point={point}
+            label="Kitchen pickup"
+            onSelect={(p) => {
+              setPoint(p);
+              setSelected(true);
+            }}
+            onDetails={(place) => {
+              setAddress((current) => current || place.label.slice(0, 500));
+            }}
+          />
+          <label className="check-label">
+            <input
+              type="checkbox"
+              required
+              checked={selected}
+              onChange={(e) => setSelected(e.target.checked)}
+            />
+            This pin is the kitchen’s pickup location.
+          </label>
+        </div>
         <label>
           Latitude
           <input
@@ -390,7 +447,11 @@ function KitchenForm({ kitchen }: { kitchen?: Restaurant }) {
             required
             min="-90"
             max="90"
-            defaultValue={kitchen?.lat ?? s.serviceArea.lat}
+            value={point.lat}
+            onChange={(e) => {
+              setPoint({ ...point, lat: e.target.valueAsNumber });
+              setSelected(false);
+            }}
           />
         </label>
         <label>
@@ -402,7 +463,11 @@ function KitchenForm({ kitchen }: { kitchen?: Restaurant }) {
             required
             min="-180"
             max="180"
-            defaultValue={kitchen?.lng ?? s.serviceArea.lng}
+            value={point.lng}
+            onChange={(e) => {
+              setPoint({ ...point, lng: e.target.valueAsNumber });
+              setSelected(false);
+            }}
           />
         </label>
         <label className="span-2">

@@ -51,6 +51,11 @@ export default function Policies() {
         window.
       </p>
       <p>
+        Place searches and coordinates selected for region detection are sent through our server to
+        the Photon location provider. Device location is requested only when you choose “Use my
+        location” and grant browser permission.
+      </p>
+      <p>
         Supabase provides account and order storage in live mode. Map tiles are loaded from
         OpenStreetMap, and the interface may request fonts from Google Fonts and partner-supplied
         image hosts. These services receive standard browser request information. Your basket is
