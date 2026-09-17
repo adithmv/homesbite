@@ -9,6 +9,7 @@ import { LocationPicker } from './location-picker';
 import { Place } from '@/lib/locations';
 import { useStore } from './store';
 import { Back } from './ui';
+import { Captcha } from './captcha';
 export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
   const s = useStore(),
     router = useRouter();
@@ -19,6 +20,12 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
     [message, setMessage] = useState('');
   const [registrationPoint, setRegistrationPoint] = useState<Point | null>(null);
   const [registrationPlace, setRegistrationPlace] = useState<Place | null>(null);
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [captchaAttempt, setCaptchaAttempt] = useState(0);
+  const captchaEnabled = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  useEffect(() => {
+    setCaptchaToken('');
+  }, [mode]);
   useEffect(() => {
     if (!supabase) return;
     const { data } = supabase.auth.onAuthStateChange((event) => {
@@ -36,9 +43,12 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
       email = String(f.get('email')),
       password = String(f.get('password'));
     try {
+      if (captchaEnabled && mode !== 'new-password' && !captchaToken)
+        throw new Error('Complete the verification before continuing.');
       if (mode === 'reset') {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${window.location.origin}/login`,
+          captchaToken,
         });
         if (error) throw error;
         setMessage('If an account exists, a password reset link is on its way.');
@@ -63,6 +73,7 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
           email,
           password,
           options: {
+            captchaToken,
             emailRedirectTo: `${window.location.origin}/login`,
             data: {
               name: String(f.get('name')),
@@ -87,7 +98,11 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
           return;
         }
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+          options: { captchaToken },
+        });
         if (error) throw error;
       }
       const {
@@ -116,6 +131,8 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
       setError(e instanceof Error ? e.message : 'Unable to complete this request.');
     } finally {
       setBusy(false);
+      setCaptchaToken('');
+      setCaptchaAttempt((n) => n + 1);
     }
   }
   if (s.demo)
@@ -262,6 +279,9 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
               />
               {mode !== 'login' && <small className="muted">Use at least 12 characters.</small>}
             </label>
+          )}
+          {captchaEnabled && mode !== 'new-password' && (
+            <Captcha key={`${mode}-${captchaAttempt}`} onToken={setCaptchaToken} />
           )}
           {error && (
             <p role="alert" className="field-error">

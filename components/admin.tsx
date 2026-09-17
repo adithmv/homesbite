@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useStore } from './store';
 import { ServiceAreaSettings } from './service-area';
+import { SecurityLog } from './security-log';
 import { AsyncButton, Gate, PageTitle } from './ui';
 import { Stat, OrderTable } from './restaurant';
 import { isActive, money } from '@/lib/domain';
@@ -110,7 +111,7 @@ function AdminWorkspace() {
         </div>
       )}
       <nav className="dashboard-tabs" aria-label="Admin sections">
-        {['orders', 'restaurants', 'riders', 'service-area'].map((t) => (
+        {['orders', 'restaurants', 'riders', 'service-area', 'security'].map((t) => (
           <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
             {t === 'orders'
               ? 'All orders'
@@ -118,11 +119,15 @@ function AdminWorkspace() {
                 ? 'Partner kitchens'
                 : t === 'riders'
                   ? 'Delivery partners'
-                  : 'Service area'}
+                  : t === 'security'
+                    ? 'Security log'
+                    : 'Service area'}
           </button>
         ))}
       </nav>
-      {tab === 'service-area' ? (
+      {tab === 'security' ? (
+        <SecurityLog />
+      ) : tab === 'service-area' ? (
         <ServiceAreaSettings />
       ) : tab === 'orders' ? (
         <>

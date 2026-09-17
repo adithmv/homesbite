@@ -25,3 +25,8 @@ variable to a dedicated compatible Photon service, then redeploy. See
 Search is submitted explicitly rather than on every keystroke. Searches and selected
 coordinates for region detection reach the configured provider; this is disclosed in the
 app's policies. Rider dispatch continues to use live GPS rather than a registration pin.
+
+The security update additionally requires migration 004 and the existing server-only
+`SUPABASE_SERVICE_ROLE_KEY` for shared search rate limits. No Photon API key is needed.
+Production lookup returns an unavailable message until that quota protection is configured.
+See [Security setup](SECURITY-SETUP.md).

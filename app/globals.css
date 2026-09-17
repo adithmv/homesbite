@@ -2188,6 +2188,11 @@ td a {
 .location-pin {
   cursor: grab;
 }
+.mfa-secret {
+  display: block;
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+}
 .service-areas {
   display: grid;
   gap: 24px;

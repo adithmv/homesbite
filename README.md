@@ -1,5 +1,9 @@
 # HomeBite
 
+For the security update (admin MFA, rate limits, audit log, CSP and optional CAPTCHA),
+follow [Security setup](docs/SECURITY-SETUP.md). Resolve any database schema mismatch
+before applying migration 004.
+
 A restaurant-first, cash-on-delivery food platform for a Bengaluru pilot. One Next.js application connects customers, restaurant owners, riders, and the platform admin.
 
 ## Run locally

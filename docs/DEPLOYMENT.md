@@ -1,5 +1,10 @@
 # Deploying HomeBite
 
+**Security update:** Follow [Security setup](SECURITY-SETUP.md) for migration 004,
+admin MFA, the server-side search quota key and optional CAPTCHA. If expected base
+tables are missing, run `supabase/diagnostics.sql` first and resolve the mismatch;
+do not overwrite an existing database by rerunning 001 blindly.
+
 ## 1. Provision Supabase
 
 Create a project in your own Supabase account and choose the desired region. Retain its database password securely. In SQL Editor, run `supabase/migrations/001_homebite.sql` once against the new project, then run `supabase/migrations/002_service_area.sql` and `supabase/migrations/003_multiple_service_areas.sql` in that order. The migrations must run as the project database owner; do not run them under an application user. They create the schema, row-level policies, role-safe signup trigger, mutation functions, audit log and Realtime publication entries.

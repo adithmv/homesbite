@@ -15,12 +15,13 @@ let kitchen: string, item: string;
 async function root() {
   await db.exec('reset role');
 }
-async function user(id: string | null) {
+async function user(id: string | null, aal = id === ids.admin ? 'aal2' : 'aal1') {
   await root();
   await db.query(
     "select set_config('request.jwt.claim.sub',$1,false), set_config('request.jwt.claim.role',$2,false)",
     [id || '', id ? 'authenticated' : 'anon'],
   );
+  await db.query("select set_config('request.jwt.claim.aal',$1,false)", [aal]);
   await db.exec(`set role ${id ? 'authenticated' : 'anon'}`);
 }
 async function rpc(name: string, args: unknown[] = []) {
@@ -58,6 +59,7 @@ beforeAll(async () => {
   await db.exec(`create role anon;create role authenticated;create role service_role;
  create schema auth;create table auth.users(id uuid primary key,raw_user_meta_data jsonb not null default '{}');
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+ create function auth.jwt() returns jsonb language sql stable as $$select jsonb_build_object('aal',current_setting('request.jwt.claim.aal',true))$$;
  create function auth.role() returns text language sql stable as $$select nullif(current_setting('request.jwt.claim.role',true),'')$$;
  grant usage on schema auth to anon,authenticated,service_role;grant execute on all functions in schema auth to anon,authenticated,service_role;
  create publication supabase_realtime;`);
@@ -76,10 +78,14 @@ beforeAll(async () => {
       'utf8',
     ),
   );
+  await db.exec(
+    readFileSync(new URL('../supabase/migrations/004_security.sql', import.meta.url), 'utf8'),
+  );
 }, 30000);
 beforeEach(async () => {
   await root();
   await db.exec('truncate auth.users cascade');
+  await db.exec('truncate private.request_limits,private.security_events');
   await db.exec(
     "update public.service_area set name='Bengaluru',lat=12.9716,lng=77.5946,radius_km=12 where id=1",
   );
@@ -458,5 +464,72 @@ describe('Multiple service areas', () => {
       ),
     );
     expect(await rows('service_areas')).toHaveLength(2);
+  });
+});
+
+describe('Security enforcement', () => {
+  it('requires MFA for admin access and changes even when bypassing the UI', async () => {
+    await user(ids.admin, 'aal1');
+    expect(await rows('riders')).toHaveLength(0);
+    await expect(
+      rpc('upsert_service_area', [{ name: 'Blocked', lat: 10, lng: 76, radius_km: 10 }]),
+    ).rejects.toThrow('Administrator');
+    await expect(rpc('approve_partner', ['rider', ids.rider, false])).rejects.toThrow(
+      'Administrator',
+    );
+    await expect(rpc('read_security_events')).rejects.toThrow('MFA');
+    await user(ids.admin, 'aal2');
+    await rpc('upsert_service_area', [{ name: 'Allowed', lat: 10, lng: 76, radius_km: 10 }]);
+    const events = await rpc('read_security_events');
+    expect(events).toBeDefined();
+    await user(ids.customer, 'aal2');
+    await expect(rpc('read_security_events')).rejects.toThrow('MFA');
+  });
+  it('limits GPS mutations while always permitting a rider to go offline', async () => {
+    await root();
+    await db.exec('truncate private.request_limits');
+    await user(ids.rider);
+    for (let i = 0; i < 30; i++) await rpc('update_rider', [true, 12.973, 77.6]);
+    await expect(rpc('update_rider', [true, 12.973, 77.6])).rejects.toThrow('Too many');
+    await rpc('update_rider', [false, null, null]);
+    expect((await rows('riders'))[0].online).toBe(false);
+  });
+  it('uses atomic shared search quotas restricted to the service role', async () => {
+    await user(ids.customer);
+    await expect(rpc('consume_location_quota', ['a'.repeat(64)])).rejects.toThrow(
+      'permission denied',
+    );
+    await root();
+    await db.exec(
+      "select set_config('request.jwt.claim.role','service_role',false); set role service_role",
+    );
+    for (let i = 0; i < 30; i++)
+      expect(await rpc('consume_location_quota', ['a'.repeat(64)])).toBe(true);
+    expect(await rpc('consume_location_quota', ['a'.repeat(64)])).toBe(false);
+    expect(await rpc('consume_location_quota', ['b'.repeat(64)])).toBe(true);
+    await expect(rpc('consume_location_quota', ['invalid'])).rejects.toThrow('Invalid bucket');
+  });
+  it('keeps audit data private and records admin changes without address or GPS payloads', async () => {
+    await user(ids.admin);
+    await rpc('approve_partner', ['rider', ids.rider, false]);
+    const events = await db.query<{ action: string }>(
+      'select * from public.read_security_events()',
+    );
+    expect(events.rows.some((e) => e.action === 'riders.suspended')).toBe(true);
+    expect(JSON.stringify(events.rows)).not.toContain('9876543210');
+    await user(ids.customer);
+    await expect(db.exec('select * from private.security_events')).rejects.toThrow(
+      'permission denied',
+    );
+  });
+  it('can reapply security after other migrations and preserves MFA requirements', async () => {
+    await root();
+    await db.exec(
+      readFileSync(new URL('../supabase/migrations/004_security.sql', import.meta.url), 'utf8'),
+    );
+    await user(ids.admin, 'aal1');
+    await expect(
+      rpc('save_service_area', [{ name: 'Blocked', lat: 10, lng: 76, radius_km: 10 }]),
+    ).rejects.toThrow('Administrator');
   });
 });

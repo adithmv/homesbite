@@ -1,5 +1,10 @@
 # Security and operational boundaries
 
+The security update adds mandatory admin MFA, shared search quotas, database write
+limits, admin audit events and a nonce-based CSP. See [setup and limitations](SECURITY-SETUP.md).
+These database controls require migration 004 on the matching schema; repository tests
+do not establish that the user's live database has these protections installed.
+
 ## Authority
 
 The Supabase public client is intentionally browser-visible. Row-level security controls all reads. Table mutations are not granted to anonymous or authenticated API roles; only narrowly defined RPCs are executable. Security-definer functions fix `search_path` and validate the authenticated user and record ownership. The private schema exposes only read predicates needed for policies. Service-role access is isolated to the server cron endpoint and must never be bundled into client code.

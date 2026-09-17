@@ -19,6 +19,7 @@ import {
 import { useState, type ReactNode } from 'react';
 import { useStore } from './store';
 import { Role } from '@/lib/domain';
+import { AdminMfa } from './admin-mfa';
 
 export function Brand() {
   return (
@@ -198,6 +199,7 @@ export function Gate({ role, children }: { role: Role; children: ReactNode }) {
         )}
       </div>
     );
+  if (role === 'admin' && !s.demo) return <AdminMfa key={s.profile?.id}>{children}</AdminMfa>;
   return <>{children}</>;
 }
 export function Loading() {

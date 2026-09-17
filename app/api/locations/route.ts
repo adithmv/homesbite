@@ -1,5 +1,9 @@
 import { locationQuery, parsePlaces } from '@/lib/locations';
+import { limitLocationRequest } from '@/lib/rate-limit';
+export const runtime = 'nodejs';
 export async function GET(request: Request) {
+  const denied = await limitLocationRequest(request);
+  if (denied) return denied;
   let query;
   try {
     query = locationQuery(new URL(request.url).searchParams);

@@ -179,9 +179,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       );
       if (failed?.error) {
         setError(
-          results[5].error
-            ? 'Service area settings are unavailable. Run the 002_service_area.sql update in Supabase, then refresh.'
-            : failed.error.message,
+          results.slice(0, 5).some((r) => ['PGRST205', '42P01'].includes(r.error?.code || ''))
+            ? 'This Supabase database does not match the HomeBite schema. Verify your project and run supabase/diagnostics.sql before applying migrations. Do not reset existing tables.'
+            : results[5].error
+              ? 'Service area settings are unavailable. Run the 002_service_area.sql update in Supabase, then refresh.'
+              : failed.error.message,
         );
         setLoading(false);
         return;
