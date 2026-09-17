@@ -11,6 +11,7 @@ export type Status =
   | 'rejected';
 export type Point = { lat: number; lng: number };
 export type ServiceArea = Point & { name: string; radius_km: number };
+export type SavedServiceArea = ServiceArea & { id: string };
 export type Profile = { id: string; name: string; phone: string; role: Role };
 export type Restaurant = Point & {
   id: string;
@@ -72,6 +73,7 @@ export type Order = {
 };
 export type AppData = {
   serviceArea: ServiceArea;
+  serviceAreas: SavedServiceArea[];
   profile: Profile | null;
   restaurants: Restaurant[];
   menu: MenuItem[];
@@ -103,6 +105,12 @@ export function inServiceArea(point: Point, area: ServiceArea) {
     Math.abs(point.lng) <= 180 &&
     distance(point, area) <= area.radius_km
   );
+}
+export function inServiceAreas(point: Point, areas: ServiceArea[]) {
+  return areas.some((area) => inServiceArea(point, area));
+}
+export function sharedServiceArea(a: Point, b: Point, areas: ServiceArea[]) {
+  return areas.find((area) => inServiceArea(a, area) && inServiceArea(b, area));
 }
 export function validateServiceArea(area: ServiceArea) {
   if (
@@ -157,7 +165,7 @@ export function validateCheckout(
   input: Checkout,
   restaurant: Restaurant,
   menu: MenuItem[],
-  area: ServiceArea = DEFAULT_SERVICE_AREA,
+  area: ServiceArea | ServiceArea[] = DEFAULT_SERVICE_AREA,
 ) {
   if (!restaurant.open || !restaurant.approved)
     throw new Error('This kitchen is not accepting orders.');
@@ -165,10 +173,13 @@ export function validateCheckout(
     throw new Error('Enter your name and complete delivery address.');
   if (!/^[6-9]\d{9}$/.test(input.phone))
     throw new Error('Enter a valid 10-digit Indian mobile number.');
-  if (!inServiceArea(input, area))
-    throw new Error(`Delivery is available within ${area.radius_km} km of ${area.name}.`);
-  if (!inServiceArea(restaurant, area))
+  const areas = Array.isArray(area) ? area : [area];
+  if (!inServiceAreas(input, areas))
+    throw new Error('Your delivery address is outside our service areas.');
+  if (!inServiceAreas(restaurant, areas))
     throw new Error('This kitchen is outside the current service area.');
+  if (!sharedServiceArea(input, restaurant, areas))
+    throw new Error('Choose a kitchen in the same service area as your delivery address.');
   if (
     !input.items.length ||
     input.items.length > 30 ||

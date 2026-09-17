@@ -14,6 +14,7 @@ import {
   DEFAULT_SERVICE_AREA,
   validateServiceArea,
   inServiceArea,
+  inServiceAreas,
   CartLine,
   Checkout,
   MenuItem,
@@ -51,7 +52,8 @@ type Store = AppData & {
   setOnline: (online: boolean, point?: { lat: number; lng: number }) => Promise<void>;
   approve: (kind: 'restaurant' | 'rider', id: string, approved: boolean) => Promise<void>;
   dispatch: () => Promise<void>;
-  saveServiceArea: (area: ServiceArea) => Promise<void>;
+  saveServiceArea: (area: ServiceArea & { id?: string }) => Promise<void>;
+  deleteServiceArea: (id: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 const Context = createContext<Store | null>(null);
@@ -59,6 +61,7 @@ const DATA_KEY = 'homebite-demo-v1';
 const CART_KEY = supabase ? 'homebite-live-cart-v1' : 'homebite-demo-cart-v1';
 const empty: AppData = {
   serviceArea: DEFAULT_SERVICE_AREA,
+  serviceAreas: [{ ...DEFAULT_SERVICE_AREA, id: 'default' }],
   profile: null,
   restaurants: [],
   menu: [],
@@ -95,7 +98,10 @@ function assign(data: AppData): AppData {
       orders,
       order.declined_rider_ids,
       now,
-      data.serviceArea.radius_km,
+      Math.max(
+        0,
+        ...data.serviceAreas.filter((a) => inServiceArea(restaurant, a)).map((a) => a.radius_km),
+      ) || 12,
     );
     if (rider)
       Object.assign(order, {
@@ -124,7 +130,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [data]);
   const commit = useCallback(
     (next: AppData) => {
-      next = { ...next, serviceArea: next.serviceArea || { ...DEFAULT_SERVICE_AREA } };
+      const areas = next.serviceAreas?.length
+        ? next.serviceAreas
+        : [{ ...(next.serviceArea || DEFAULT_SERVICE_AREA), id: 'default' }];
+      next = { ...next, serviceAreas: areas, serviceArea: areas[0] };
       dataRef.current = next;
       setData(next);
       if (demo) localStorage.setItem(DATA_KEY, JSON.stringify(next));
@@ -152,11 +161,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               .order('created_at', { ascending: false })
           : Promise.resolve({ data: [], error: null }),
         supabase.from('service_area').select('name,lat,lng,radius_km').eq('id', 1).single(),
+        supabase
+          .from('service_areas')
+          .select('id,name,lat,lng,radius_km')
+          .order('created_at')
+          .order('id'),
       ]);
       if (generation !== refreshGeneration.current) return;
       // During a rolling upgrade, an unmigrated database still enforces the original area.
       const areaMigrationPending = ['PGRST205', '42P01'].includes(results[5].error?.code || '');
-      const failed = results.find((r, index) => r.error && !(index === 5 && areaMigrationPending));
+      const multiMigrationPending = ['PGRST205', '42P01'].includes(results[6].error?.code || '');
+      const failed = results.find(
+        (r, index) =>
+          r.error &&
+          !(index === 5 && areaMigrationPending) &&
+          !(index === 6 && multiMigrationPending),
+      );
       if (failed?.error) {
         setError(
           results[5].error
@@ -168,6 +188,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       const next = {
         serviceArea: areaMigrationPending ? { ...DEFAULT_SERVICE_AREA } : results[5].data,
+        serviceAreas: multiMigrationPending ? undefined : results[6].data,
         profile: results[0].data,
         restaurants: results[1].data ?? [],
         menu: results[2].data ?? [],
@@ -203,6 +224,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             setData({
               ...incoming,
               serviceArea: incoming.serviceArea || { ...DEFAULT_SERVICE_AREA },
+              serviceAreas: incoming.serviceAreas || [
+                { ...(incoming.serviceArea || DEFAULT_SERVICE_AREA), id: 'default' },
+              ],
             });
           } catch {
             /* ignore corrupt storage */
@@ -335,7 +359,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         { ...input, items: cart },
         restaurant,
         data.menu,
-        data.serviceArea,
+        data.serviceAreas,
       );
       let id: string;
       if (!demo) id = await rpc('place_order', { payload: { ...input, items: cart } });
@@ -433,7 +457,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (data.profile?.role !== 'restaurant') throw new Error('Restaurant account required.');
-      if (!inServiceArea(values as Restaurant, data.serviceArea))
+      if (!inServiceAreas(values as Restaurant, data.serviceAreas))
         throw new Error('Kitchen must be inside the configured service area.');
       commit({
         ...data,
@@ -485,7 +509,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...current,
           riders: current.riders.map((r) =>
             r.id === current.profile?.id
-              ? { ...r, online, ...point, location_updated_at: new Date().toISOString() }
+              ? {
+                  ...r,
+                  online,
+                  ...point,
+                  location_updated_at: point ? new Date().toISOString() : r.location_updated_at,
+                }
               : r,
           ),
         }),
@@ -513,17 +542,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const values = { ...area, name: area.name.trim() };
       if (!demo) {
         try {
-          await rpc('save_service_area', { payload: values });
+          await rpc('upsert_service_area', {
+            payload: { ...values, id: values.id === 'default' ? undefined : values.id },
+          });
         } catch (error) {
-          if (error instanceof Error && error.message.includes('save_service_area'))
+          if (error instanceof Error && error.message.includes('upsert_service_area'))
             throw new Error(
-              'Run 002_service_area.sql in your Supabase SQL Editor to enable this setting, then refresh.',
+              'Run 003_multiple_service_areas.sql in your Supabase SQL Editor, then refresh.',
             );
           throw error;
         }
         return;
       }
-      commit({ ...dataRef.current, serviceArea: values });
+      const current = dataRef.current;
+      const areas = values.id
+        ? current.serviceAreas.map((a) => (a.id === values.id ? { ...values, id: a.id } : a))
+        : [...current.serviceAreas, { ...values, id: uid() }];
+      commit({ ...current, serviceAreas: areas, serviceArea: areas[0] });
+    },
+    async deleteServiceArea(id) {
+      if (dataRef.current.profile?.role !== 'admin')
+        throw new Error('Administrator access required.');
+      if (dataRef.current.serviceAreas.length <= 1)
+        throw new Error(
+          'Keep at least one service area. Add another area before deleting this one.',
+        );
+      if (!demo) {
+        await rpc('delete_service_area', { area_id: id });
+        return;
+      }
+      const areas = dataRef.current.serviceAreas.filter((a) => a.id !== id);
+      commit({ ...dataRef.current, serviceAreas: areas, serviceArea: areas[0] });
     },
     async dispatch() {
       if (!demo) {

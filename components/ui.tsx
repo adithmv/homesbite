@@ -70,7 +70,7 @@ export function Shell({ children }: { children: ReactNode }) {
               <div>
                 <small>DELIVERING IN</small>
                 <strong>
-                  {s.serviceArea.name} <ChevronDown size={13} />
+                  {s.serviceAreas.map((a) => a.name).join(', ')} <ChevronDown size={13} />
                 </strong>
               </div>
             </div>
@@ -159,7 +159,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <Link href="/policies">Policies & support</Link>
         </div>
         <span>
-          Made for {s.serviceArea.name}.
+          Made for {s.serviceAreas.map((a) => a.name).join(', ')}.
           <br />
           Cash on delivery, always clear.
         </span>

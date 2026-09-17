@@ -2,7 +2,11 @@
 
 ## 1. Provision Supabase
 
-Create a project in your own Supabase account and choose the desired region. Retain its database password securely. In SQL Editor, run `supabase/migrations/001_homebite.sql` once against the new project, then run `supabase/migrations/002_service_area.sql`. The migration must run as the project database owner; do not run it under an application user. It creates the schema, row-level policies, role-safe signup trigger, mutation functions, audit log and Realtime publication entries.
+Create a project in your own Supabase account and choose the desired region. Retain its database password securely. In SQL Editor, run `supabase/migrations/001_homebite.sql` once against the new project, then run `supabase/migrations/002_service_area.sql` and `supabase/migrations/003_multiple_service_areas.sql` in that order. The migrations must run as the project database owner; do not run them under an application user. They create the schema, row-level policies, role-safe signup trigger, mutation functions, audit log and Realtime publication entries.
+
+For an existing installation with 001 and 002 already applied, run **only 003_multiple_service_areas.sql**, then refresh the app. It preserves the existing area and orders. Admin → Service area lets you add, edit, and delete locations individually. Each has a centre and radius; a kitchen and delivery address must share at least one area. At least one area must remain. Removing an area does not cancel active deliveries.
+
+The rider dashboard shares fresh GPS approximately every five seconds while online, shows GPS accuracy and the age of the last successful upload, and allows following the rider or viewing all stops on the map. Customer tracking listens to Supabase Realtime with a 15-second polling fallback. Browser geolocation requires HTTPS and permission; background tabs, closed pages and locked screens can interrupt it. This is foreground browser tracking, not a native background tracking service. Positions older than 30 seconds are labelled stale and customer pins older than five minutes are hidden. Use two signed-in devices to verify rider movement and customer updates before launch.
 
 The production database starts **empty**. The demo kitchens exist only in the local demo module and are not silently seeded into live operations.
 

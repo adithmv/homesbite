@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Role, inServiceArea, Point } from '@/lib/domain';
+import { Role, inServiceAreas, Point } from '@/lib/domain';
 import { LocationPicker } from './location-picker';
 import { Place } from '@/lib/locations';
 import { useStore } from './store';
@@ -54,7 +54,7 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
       if (mode === 'signup') {
         if (
           role === 'restaurant' &&
-          (!registrationPoint || !inServiceArea(registrationPoint, s.serviceArea))
+          (!registrationPoint || !inServiceAreas(registrationPoint, s.serviceAreas))
         )
           throw new Error(
             'Select a kitchen location inside the service area before creating your account.',
@@ -238,8 +238,8 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
               )}
               {role === 'restaurant' && (
                 <p className="small muted">
-                  Choose your actual kitchen pickup location. Delivery is available within{' '}
-                  {s.serviceArea.radius_km} km of {s.serviceArea.name}.
+                  Choose your actual kitchen pickup location. Available service areas:{' '}
+                  {s.serviceAreas.map((a) => a.name).join(', ')}.
                 </p>
               )}
             </div>

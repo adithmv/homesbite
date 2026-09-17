@@ -90,3 +90,10 @@ GitHub Actions runs type checking, lint, tests and the production build on pushe
 Review [launch checklist](docs/LAUNCH-CHECKLIST.md). Replace fictional content with consenting partner kitchens and accurate food photography. The policy page is explicitly a **draft** requiring business identity, verified support contact, data retention and operator review. No staffed support service, legal sign-off, real-world rider recruitment, or production operational validation is implied.
 
 Existing Supabase installations must apply [migration 002](supabase/migrations/002_service_area.sql) to enable [Admin service-area settings](docs/SERVICE-AREA.md). No existing orders are removed.
+
+Apply [migration 003](supabase/migrations/003_multiple_service_areas.sql) after 002 to add,
+edit, and delete multiple service areas. Each area has a searchable map pin and radius;
+kitchens and delivery addresses must share an area. The rider dashboard includes a live
+GPS map, follow controls, accuracy and upload status, pickup/delivery navigation, and daily
+delivery totals. Customer tracking uses Realtime with a polling fallback. Keep the rider
+page open with location permission enabled; locked screens may pause browser tracking.

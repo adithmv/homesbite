@@ -3,6 +3,7 @@ export const FOOD_IMAGE = '/food.jpg';
 export function demoData(): AppData {
   return {
     serviceArea: { ...DEFAULT_SERVICE_AREA },
+    serviceAreas: [{ ...DEFAULT_SERVICE_AREA, id: 'default' }],
     profile: { id: 'customer-demo', role: 'customer', name: 'Alex', phone: '9876543210' },
     restaurants: [
       {

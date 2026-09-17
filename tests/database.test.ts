@@ -70,12 +70,21 @@ beforeAll(async () => {
   await db.exec(
     readFileSync(new URL('../supabase/migrations/002_service_area.sql', import.meta.url), 'utf8'),
   );
+  await db.exec(
+    readFileSync(
+      new URL('../supabase/migrations/003_multiple_service_areas.sql', import.meta.url),
+      'utf8',
+    ),
+  );
 }, 30000);
 beforeEach(async () => {
   await root();
   await db.exec('truncate auth.users cascade');
   await db.exec(
     "update public.service_area set name='Bengaluru',lat=12.9716,lng=77.5946,radius_km=12 where id=1",
+  );
+  await db.exec(
+    "truncate public.service_areas; insert into public.service_areas(name,lat,lng,radius_km) values('Bengaluru',12.9716,77.5946,12)",
   );
   for (const [key, id] of Object.entries(ids)) {
     const role =
@@ -380,7 +389,74 @@ describe('Admin-configured service area', () => {
     await db.exec(
       readFileSync(new URL('../supabase/migrations/002_service_area.sql', import.meta.url), 'utf8'),
     );
+    await db.exec(
+      readFileSync(
+        new URL('../supabase/migrations/003_multiple_service_areas.sql', import.meta.url),
+        'utf8',
+      ),
+    );
     expect((await rows('service_area'))[0].radius_km).toBe(25);
     expect((await rows('orders'))[0].id).toBe(id);
+  });
+});
+
+describe('Multiple service areas', () => {
+  const kochi = { name: 'Kochi', lat: 9.9312, lng: 76.2673, radius_km: 15 };
+  it('allows admin additions, edits and deletion while preserving orders and the final area', async () => {
+    const order = await place();
+    await user(ids.admin);
+    const added = await rpc('upsert_service_area', [kochi]);
+    expect(await rows('service_areas')).toHaveLength(2);
+    await rpc('upsert_service_area', [{ ...kochi, id: added, name: 'Kochi central' }]);
+    expect((await rows('service_areas')).some((a) => a.name === 'Kochi central')).toBe(true);
+    await rpc('delete_service_area', [added]);
+    expect(await rows('service_areas')).toHaveLength(1);
+    expect((await rows('orders'))[0].id).toBe(order);
+    await expect(rpc('delete_service_area', [(await rows('service_areas'))[0].id])).rejects.toThrow(
+      'at least one',
+    );
+  });
+  it('blocks unauthorized additions and deletes, and rolls back invalid edits', async () => {
+    await user(ids.admin);
+    const original = (await rows('service_areas'))[0];
+    for (const actor of [null, ids.customer, ids.owner, ids.rider]) {
+      await user(actor);
+      await expect(rpc('upsert_service_area', [kochi])).rejects.toThrow();
+      await expect(rpc('delete_service_area', [original.id])).rejects.toThrow();
+      await expect(db.exec('delete from public.service_areas')).rejects.toThrow(
+        'permission denied',
+      );
+    }
+    await user(ids.admin);
+    await expect(
+      rpc('upsert_service_area', [{ ...kochi, id: original.id, lat: 91 }]),
+    ).rejects.toThrow();
+    expect((await rows('service_areas'))[0].name).toBe('Bengaluru');
+  });
+  it('accepts a second city kitchen but rejects cross-city orders', async () => {
+    await user(ids.admin);
+    await rpc('upsert_service_area', [kochi]);
+    await user(ids.customer);
+    await expect(
+      rpc('place_order', [{ ...payload(), lat: kochi.lat, lng: kochi.lng }]),
+    ).rejects.toThrow('share a service area');
+    await user(ids.owner);
+    const original = (await rows('restaurants'))[0];
+    await rpc('save_restaurant', [{ ...original, ...kochi }]);
+    await user(ids.customer);
+    await rpc('place_order', [{ ...payload(), lat: kochi.lat, lng: kochi.lng }]);
+    expect(await rows('orders')).toHaveLength(1);
+  });
+  it('seeds once and preserves additional areas when rerun', async () => {
+    await user(ids.admin);
+    await rpc('upsert_service_area', [kochi]);
+    await root();
+    await db.exec(
+      readFileSync(
+        new URL('../supabase/migrations/003_multiple_service_areas.sql', import.meta.url),
+        'utf8',
+      ),
+    );
+    expect(await rows('service_areas')).toHaveLength(2);
   });
 });

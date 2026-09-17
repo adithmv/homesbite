@@ -4,9 +4,32 @@ import {
   inServiceArea,
   validateServiceArea,
   validateCheckout,
+  inServiceAreas,
 } from '../lib/domain';
 import { demoData } from '../lib/demo';
 describe('Service-area rules', () => {
+  it('accepts any configured area but rejects delivery between separate areas', () => {
+    const d = demoData();
+    const kochi = { name: 'Kochi', lat: 9.9312, lng: 76.2673, radius_km: 10 };
+    const areas = [DEFAULT_SERVICE_AREA, kochi];
+    expect(inServiceAreas(kochi, areas)).toBe(true);
+    expect(inServiceAreas(kochi, [])).toBe(false);
+    const input = {
+      ...kochi,
+      restaurant_id: 'r1',
+      items: [{ id: 'm1', quantity: 1 }],
+      customer_name: 'Alex',
+      phone: '9876543210',
+      address: 'Test address in Kochi',
+      notes: '',
+    };
+    expect(() => validateCheckout(input, d.restaurants[0], d.menu, areas)).toThrow(
+      'same service area',
+    );
+    expect(validateCheckout(input, { ...d.restaurants[0], ...kochi }, d.menu, areas)).toHaveLength(
+      1,
+    );
+  });
   it('validates boundaries and numeric input', () => {
     expect(inServiceArea(DEFAULT_SERVICE_AREA, DEFAULT_SERVICE_AREA)).toBe(true);
     expect(inServiceArea({ lat: NaN, lng: 0 }, DEFAULT_SERVICE_AREA)).toBe(false);

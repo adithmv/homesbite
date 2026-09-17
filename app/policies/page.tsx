@@ -47,13 +47,14 @@ export default function Policies() {
       <p>
         Online riders share location with the platform to match nearby pickups. Customers can see
         their assigned rider’s latest location during an active delivery. Location sharing needs
-        browser permission and an open rider window. Going offline stops location updates from that
-        window.
+        browser permission and an open rider window. Fresh GPS is uploaded approximately every five
+        seconds while online; background tabs or a locked screen may pause updates. Going offline
+        stops location updates from that window.
       </p>
       <p>
         Place searches and coordinates selected for region detection are sent through our server to
         the Photon location provider. Device location is requested only when you choose “Use my
-        location” and grant browser permission.
+        location” or go online as a rider and grant browser permission.
       </p>
       <p>
         Supabase provides account and order storage in live mode. Map tiles are loaded from

@@ -5,7 +5,9 @@ import { useStore } from './store';
 import { AsyncButton, Empty, Gate, PageTitle } from './ui';
 import { Stat, OrderTable } from './restaurant';
 import { DeliveryMap } from './map';
-import { isActive, money } from '@/lib/domain';
+import { isActive, money, distance } from '@/lib/domain';
+import { useRiderGps } from './use-rider-gps';
+import { freshnessLabel, locationAge } from '@/lib/tracking';
 export function RiderDashboard() {
   return (
     <Gate role="rider">
@@ -15,7 +17,6 @@ export function RiderDashboard() {
 }
 function RiderWorkspace() {
   const s = useStore(),
-    [locationError, setLocationError] = useState(''),
     [now, setNow] = useState(0),
     [cashConfirmed, setCashConfirmed] = useState(false);
   const rider = s.riders.find((r) => r.id === s.profile?.id);
@@ -24,12 +25,25 @@ function RiderWorkspace() {
   const completed = s.orders.filter(
     (o) => o.rider_id === s.profile?.id && o.status === 'delivered',
   );
-  const updateLocation = useRef(s.setOnline),
-    dispatch = useRef(s.dispatch);
+  const dispatch = useRef(s.dispatch);
+  const gps = useRiderGps(!!rider?.online && !!rider.approved && !s.demo, (point) =>
+    s.setOnline(true, point),
+  );
   useEffect(() => {
-    updateLocation.current = s.setOnline;
     dispatch.current = s.dispatch;
-  }, [s.setOnline, s.dispatch]);
+  }, [s.dispatch]);
+  const demoHeartbeat = useRef(s.setOnline);
+  useEffect(() => {
+    demoHeartbeat.current = s.setOnline;
+  }, [s.setOnline]);
+  useEffect(() => {
+    if (!s.demo || !rider?.online || !rider.approved) return;
+    const tick = () =>
+      void demoHeartbeat.current(true, { lat: rider.lat, lng: rider.lng }).catch(() => {});
+    tick();
+    const timer = setInterval(tick, 30000);
+    return () => clearInterval(timer);
+  }, [s.demo, rider?.online, rider?.approved, rider?.lat, rider?.lng]);
   useEffect(() => {
     setCashConfirmed(false);
   }, [job?.id]);
@@ -42,47 +56,15 @@ function RiderWorkspace() {
       clearInterval(assignment);
     };
   }, []);
-  useEffect(() => {
-    if (!rider?.online || !rider.approved) return;
-    if (s.demo) {
-      const tick = () =>
-        void updateLocation
-          .current(true, { lat: s.serviceArea.lat, lng: s.serviceArea.lng })
-          .catch(() => {});
-      tick();
-      const timer = setInterval(tick, 60000);
-      return () => clearInterval(timer);
-    }
-    if (!navigator.geolocation) {
-      setLocationError('This browser does not support location sharing.');
-      return;
-    }
-    let last = 0,
-      stopped = false;
-    const watch = navigator.geolocation.watchPosition(
-      (p) => {
-        if (stopped || Date.now() - last < 15000) return;
-        last = Date.now();
-        setLocationError('');
-        void updateLocation
-          .current(true, { lat: p.coords.latitude, lng: p.coords.longitude })
-          .catch((e) => setLocationError(e.message));
-      },
-      () => {
-        if (stopped) return;
-        setLocationError('Location sharing stopped. Enable location access to receive deliveries.');
-        void updateLocation.current(false).catch(() => {});
-      },
-      { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 },
-    );
-    return () => {
-      stopped = true;
-      navigator.geolocation.clearWatch(watch);
-    };
-  }, [rider?.online, rider?.approved, s.demo, rider?.id, s.serviceArea.lat, s.serviceArea.lng]);
   async function toggle() {
     if (rider?.online) {
-      await s.setOnline(false);
+      await gps.pause();
+      try {
+        await s.setOnline(false);
+      } catch (error) {
+        gps.retry();
+        throw error;
+      }
       return;
     }
     if (s.demo) {
@@ -103,8 +85,15 @@ function RiderWorkspace() {
     job?.assigned_at && now
       ? Math.max(0, 60 - Math.floor((now - Date.parse(job.assigned_at)) / 1000))
       : 0;
+  const position = s.demo ? rider : gps.fix || rider;
+  const gpsAge = locationAge(gps.fix?.timestamp, now);
+  const sharedAge = locationAge(gps.sharedAt || rider?.location_updated_at, now);
+  const nextStop = job?.status === 'picked_up' ? job : kitchen;
+  const today = completed.filter(
+    (o) => new Date(o.updated_at).toDateString() === new Date(now).toDateString(),
+  );
   const mapsUrl = (lat: number, lng: number) =>
-    `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${rider?.lat || s.serviceArea.lat}%2C${rider?.lng || s.serviceArea.lng}%3B${lat}%2C${lng}`;
+    `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${position?.lat ?? s.serviceArea.lat}%2C${position?.lng ?? s.serviceArea.lng}%3B${lat}%2C${lng}`;
   return (
     <div className="page dashboard-page">
       <PageTitle
@@ -127,9 +116,9 @@ function RiderWorkspace() {
           can go online.
         </div>
       )}
-      {locationError && (
+      {gps.error && (
         <p className="field-error" role="alert">
-          {locationError}
+          {gps.error}
         </p>
       )}
       <div className="stats">
@@ -140,13 +129,13 @@ function RiderWorkspace() {
         />
         <Stat
           icon={<CheckCircle2 size={16} />}
-          label="Completed deliveries"
-          value={String(completed.length)}
+          label="Deliveries today"
+          value={String(today.length)}
         />
         <Stat
           icon={<Wallet size={16} />}
-          label="Delivery fees earned"
-          value={money(completed.reduce((n, o) => n + o.delivery_fee, 0))}
+          label="Fees earned today"
+          value={money(today.reduce((n, o) => n + o.delivery_fee, 0))}
         />
         <Stat
           icon={<Wallet size={16} />}
@@ -154,9 +143,119 @@ function RiderWorkspace() {
           value={money(completed.reduce((n, o) => n + o.total, 0))}
         />
       </div>
+      {job && (
+        <div className="rider-offer" role="status">
+          <div>
+            <strong>{job.rider_accepted ? 'Delivery in progress' : 'New delivery offer'}</strong>
+            <p className="small">
+              {job.rider_accepted
+                ? job.status === 'picked_up'
+                  ? 'Head to the customer and collect cash.'
+                  : `Collect from ${kitchen?.name || 'the kitchen'}.`
+                : `Accept within ${remaining}s · Earn ${money(job.delivery_fee)}`}
+            </p>
+          </div>
+          <a className="button" href="#active-delivery">
+            {job.rider_accepted ? 'Open delivery' : 'Review offer'}
+          </a>
+        </div>
+      )}
+      <section className="panel rider-live-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">LIVE LOCATION</p>
+            <h2>
+              {s.demo
+                ? 'Demo rider map'
+                : rider?.online
+                  ? gpsAge < 30
+                    ? 'GPS connected'
+                    : 'Waiting for fresh GPS'
+                  : 'You are offline'}
+            </h2>
+          </div>
+          <span className={`pill ${rider?.online && (s.demo || sharedAge < 30) ? 'green' : ''}`}>
+            {s.demo
+              ? 'Simulated location'
+              : rider?.online && sharedAge < 30
+                ? 'Sharing live'
+                : 'Not sharing a fresh location'}
+          </span>
+        </div>
+        <div className="tracking-metrics">
+          <span>
+            <strong>{s.demo ? 'Demo' : freshnessLabel(sharedAge)}</strong>Last successful location
+            upload
+          </span>
+          <span>
+            <strong>{gps.fix && !s.demo ? `±${Math.round(gps.fix.accuracy)} m` : '—'}</strong>GPS
+            accuracy
+          </span>
+          <span>
+            <strong>
+              {position && nextStop ? `${distance(position, nextStop).toFixed(1)} km` : '—'}
+            </strong>
+            To {job?.status === 'picked_up' ? 'customer' : 'pickup'} · straight-line distance
+          </span>
+        </div>
+        <DeliveryMap
+          followPoint={rider?.online && (s.demo || gpsAge < 30) && position ? position : undefined}
+          markers={[
+            ...(position && (s.demo || sharedAge < 300 || gpsAge < 30)
+              ? [
+                  {
+                    lat: position.lat,
+                    lng: position.lng,
+                    label: s.demo
+                      ? 'Demo rider'
+                      : gpsAge < 30
+                        ? 'Your live position'
+                        : 'Last known position',
+                    color: '#386aa8',
+                  },
+                ]
+              : []),
+            ...(kitchen
+              ? [{ lat: kitchen.lat, lng: kitchen.lng, label: `Pickup: ${kitchen.name}` }]
+              : []),
+            ...(job ? [{ lat: job.lat, lng: job.lng, label: 'Customer', color: '#d77824' }] : []),
+          ]}
+        />
+        <div className="row-actions">
+          {rider?.online && !s.demo && (
+            <button type="button" className="button secondary small" onClick={gps.retry}>
+              Retry GPS
+            </button>
+          )}
+          {nextStop && (
+            <a
+              className="button"
+              href={mapsUrl(nextStop.lat, nextStop.lng)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink size={16} /> Navigate to{' '}
+              {job?.status === 'picked_up' ? 'customer' : 'pickup'}
+            </a>
+          )}
+        </div>
+        <p className="small muted">
+          {s.demo
+            ? 'Demo mode uses a simulated pin; no device GPS is shared.'
+            : 'Keep this page open and allow location access. Fresh GPS is shared about every 5 seconds while online. Background tabs and locked screens may pause tracking.'}
+        </p>
+        {!s.demo && rider?.online && sharedAge >= 30 && (
+          <p className="hint" role="status">
+            Your shared position is out of date. Check GPS permission and your internet connection.
+          </p>
+        )}
+        {!s.demo && gps.fix && gps.fix.accuracy > 100 && (
+          <p className="hint">GPS accuracy is low. Move outdoors for a more precise position.</p>
+        )}
+      </section>
       {job ? (
         <div className="rider-layout">
-          <section className="panel rider-job">
+          <section className="panel rider-job" id="active-delivery">
             <p className="eyebrow">DELIVERY #{job.id.slice(0, 8).toUpperCase()}</p>
             <h2>
               {job.status === 'picked_up'
@@ -248,19 +347,17 @@ function RiderWorkspace() {
             <h2>
               <MapPin size={20} /> Your delivery route
             </h2>
-            <DeliveryMap
-              markers={[
-                ...(kitchen ? [{ lat: kitchen.lat, lng: kitchen.lng, label: kitchen.name }] : []),
-                { lat: job.lat, lng: job.lng, label: 'Customer', color: '#d77824' },
-                ...(rider
-                  ? [{ lat: rider.lat, lng: rider.lng, label: 'You', color: '#386aa8' }]
-                  : []),
-              ]}
-            />
-            <p className="small muted">
-              Map pins show pickup, drop, and your last shared location. Open directions for a
-              route.
-            </p>
+            <ol className="delivery-steps">
+              <li className={job.rider_accepted ? 'done' : 'active'}>Accept delivery</li>
+              <li
+                className={job.status === 'picked_up' ? 'done' : job.rider_accepted ? 'active' : ''}
+              >
+                Collect from kitchen
+              </li>
+              <li className={job.status === 'picked_up' ? 'active' : ''}>
+                Deliver and collect cash
+              </li>
+            </ol>
             <h3>In the bag</h3>
             {job.items.map((item, i) => (
               <p className="small" key={i}>

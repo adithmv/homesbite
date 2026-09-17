@@ -6,9 +6,11 @@ export type MapMarker = Point & { label: string; color?: string; radiusKm?: numb
 export function DeliveryMap({
   markers,
   onSelect,
+  followPoint,
 }: {
   markers: MapMarker[];
   onSelect?: (point: Point) => void;
+  followPoint?: Point;
 }) {
   const element = useRef<HTMLDivElement>(null),
     map = useRef<Leaflet.Map | null>(null),
@@ -17,6 +19,7 @@ export function DeliveryMap({
     callback = useRef(onSelect);
   const [ready, setReady] = useState(false),
     [error, setError] = useState('');
+  const [following, setFollowing] = useState(true);
   const fitted = useRef(false);
   useEffect(() => {
     callback.current = onSelect;
@@ -42,6 +45,7 @@ export function DeliveryMap({
         instance.on('click', (event) =>
           callback.current?.({ lat: event.latlng.lat, lng: event.latlng.lng }),
         );
+        instance.on('dragstart', () => setFollowing(false));
         if (typeof ResizeObserver !== 'undefined') {
           observer = new ResizeObserver(() => instance.invalidateSize({ pan: false }));
           observer.observe(element.current);
@@ -89,7 +93,8 @@ export function DeliveryMap({
           fillOpacity: 0.1,
           interactive: false,
         }).addTo(group);
-        areaBounds = circle.getBounds();
+        const bounds = circle.getBounds();
+        areaBounds = areaBounds ? areaBounds.extend(bounds) : bounds;
       }
       const tip = document.createElement('span');
       tip.textContent = m.label;
@@ -121,16 +126,29 @@ export function DeliveryMap({
     }
     if (!points.length) return;
     if (!fitted.current && areaBounds) instance.fitBounds(areaBounds, { padding: [20, 20] });
-    else if (points.length > 1)
+    else if (!fitted.current && points.length > 1)
       instance.fitBounds(L.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number])), {
         padding: [35, 35],
         maxZoom: 15,
       });
     else if (!fitted.current) instance.setView([points[0].lat, points[0].lng], 15);
-    else if (!instance.getBounds().contains([points[0].lat, points[0].lng]))
+    else if (selectable && !instance.getBounds().contains([points[0].lat, points[0].lng]))
       instance.panTo([points[0].lat, points[0].lng]);
     fitted.current = true;
   }, [markerKey, ready, selectable]);
+  const followLat = followPoint?.lat,
+    followLng = followPoint?.lng;
+  useEffect(() => {
+    if (
+      ready &&
+      following &&
+      followLat !== undefined &&
+      followLng !== undefined &&
+      Number.isFinite(followLat) &&
+      Number.isFinite(followLng)
+    )
+      map.current?.panTo([followLat, followLng]);
+  }, [ready, following, followLat, followLng]);
   return (
     <div>
       {error && (
@@ -145,6 +163,38 @@ export function DeliveryMap({
           selectable ? 'Location map: click to select or drag the pin' : 'Delivery locations map'
         }
       />
+      {!selectable && (
+        <div className="map-actions">
+          {followPoint && (
+            <button
+              type="button"
+              className="button secondary small"
+              aria-pressed={following}
+              onClick={() => setFollowing(!following)}
+            >
+              {following ? 'Pause following' : 'Follow rider'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={!ready || !markers.length}
+            onClick={() => {
+              const points = markers.filter(
+                (p) => Number.isFinite(p.lat) && Number.isFinite(p.lng),
+              );
+              if (!points.length || !api.current) return;
+              setFollowing(false);
+              map.current?.fitBounds(
+                api.current.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number])),
+                { padding: [35, 35], maxZoom: 15 },
+              );
+            }}
+          >
+            Show all locations
+          </button>
+        </div>
+      )}
       {selectable && (
         <button
           className="button secondary small"

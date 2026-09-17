@@ -1,5 +1,5 @@
 'use client';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Check, CheckCircle2, Clock3, MapPin, Phone, ShieldCheck } from 'lucide-react';
@@ -9,7 +9,8 @@ import { Quantity } from './discovery';
 import { DeliveryMap, MapMarker } from './map';
 import { LocationPicker } from './location-picker';
 import { DELIVERY_FEE, isActive, labels, money, timeline } from '@/lib/domain';
-import { supabase } from '@/lib/supabase';
+import { useLiveRider } from './use-live-rider';
+import { freshnessLabel, locationAge } from '@/lib/tracking';
 export function CheckoutPage() {
   return (
     <Gate role="customer">
@@ -127,8 +128,8 @@ function CheckoutForm() {
             }}
           />
           <p className="small muted">
-            Click the map or enter coordinates. Available within {s.serviceArea.radius_km} km of{' '}
-            {s.serviceArea.name}.
+            Click the map or enter coordinates. Choose an address in the same service area as your
+            kitchen.
           </p>
           <div className="form-grid">
             <label>
@@ -289,41 +290,20 @@ export function OrderHistory() {
   );
 }
 export function OrderTracking({ id }: { id: string }) {
-  const s = useStore(),
-    [riderPoint, setRiderPoint] = useState<MapMarker | null>(null);
+  const s = useStore();
   const order = s.orders.find((o) => o.id === id);
-  useEffect(() => {
-    if (
-      !supabase ||
-      !order?.rider_id ||
-      !order.status ||
-      ['delivered', 'cancelled', 'rejected'].includes(order.status)
-    ) {
-      setRiderPoint(null);
-      return;
-    }
-    let stopped = false;
-    const riderId = order.rider_id;
-    const read = async () => {
-      const { data } = await supabase!
-        .from('rider_locations')
-        .select('lat,lng,updated_at')
-        .eq('rider_id', riderId)
-        .maybeSingle();
-      if (!stopped)
-        setRiderPoint(
-          data && Date.now() - Date.parse(data.updated_at) < 300000
-            ? { lat: data.lat, lng: data.lng, label: 'Rider location', color: '#d77824' }
-            : null,
-        );
-    };
-    void read();
-    const timer = setInterval(() => void read(), 10000);
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-    };
-  }, [order?.rider_id, order?.status]);
+  const active = !!order && isActive(order);
+  const { location, now } = useLiveRider(order?.rider_id, active);
+  const age = locationAge(location?.updated_at, now);
+  const riderPoint: MapMarker | null =
+    location && age < 300
+      ? {
+          lat: location.lat,
+          lng: location.lng,
+          label: age < 30 ? 'Live rider position' : 'Last known rider position',
+          color: age < 30 ? '#386aa8' : '#888888',
+        }
+      : null;
   if (s.loading) return <Loading />;
   if (!order)
     return (
@@ -338,7 +318,7 @@ export function OrderTracking({ id }: { id: string }) {
   const r = s.restaurants.find((r) => r.id === order.restaurant_id),
     cancelled = ['cancelled', 'rejected'].includes(order.status),
     step = timeline.indexOf(order.status);
-  const demoRider = s.demo ? s.riders.find((r) => r.id === order.rider_id) : null;
+  const demoRider = s.demo && active ? s.riders.find((r) => r.id === order.rider_id) : null;
   const markers: MapMarker[] = [
     { lat: order.lat, lng: order.lng, label: 'Your delivery address', color: '#db7b28' },
     ...(r ? [{ lat: r.lat, lng: r.lng, label: r.name }] : []),
@@ -398,7 +378,19 @@ export function OrderTracking({ id }: { id: string }) {
               ))}
             </ol>
           )}
-          <DeliveryMap markers={markers} />
+          <DeliveryMap
+            key={order.id + (order.rider_id || '')}
+            markers={markers}
+            followPoint={age < 30 && riderPoint ? riderPoint : undefined}
+          />
+          {active && order.rider_id && !s.demo && (
+            <p className={age < 30 ? 'success' : 'hint'} role="status">
+              {freshnessLabel(age)}
+              {age >= 30
+                ? ' · Live position is temporarily unavailable. The rider may have weak GPS or internet.'
+                : ' · Rider location updates automatically.'}
+            </p>
+          )}
           <p className="small muted">
             Map shows location pins, not a calculated route. Rider location appears while a delivery
             is active and location sharing is fresh.

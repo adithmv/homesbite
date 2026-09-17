@@ -14,7 +14,8 @@ Device location needs browser permission and HTTPS (or localhost). If permission
 search and manual map selection remain available. If region lookup fails, the chosen
 coordinates remain usable.
 
-No additional SQL migration or API key is needed for this update. Search uses the server
+Place search requires no API key. Multiple admin service areas require migration
+`003_multiple_service_areas.sql` after 002. Search uses the server
 route `/api/locations` with Photon and OpenStreetMap data. The default public Photon demo
 service is for reasonable pilot usage, can throttle requests, and offers no availability
 guarantee. For production traffic, configure the server-only `PHOTON_BASE_URL` environment

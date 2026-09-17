@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useStore } from './store';
 import { Back, Empty, Loading } from './ui';
-import { money, inServiceArea } from '@/lib/domain';
+import { money, inServiceAreas } from '@/lib/domain';
 import { FOOD_IMAGE } from '@/lib/demo';
 
 export function Discover() {
@@ -33,7 +33,7 @@ export function Discover() {
         .filter(
           (r) =>
             r.approved &&
-            inServiceArea(r, s.serviceArea) &&
+            inServiceAreas(r, s.serviceAreas) &&
             (cuisine === 'All kitchens' || r.cuisine === cuisine) &&
             (!veg || s.menu.some((m) => m.restaurant_id === r.id && m.veg && m.available)) &&
             `${r.name} ${r.cuisine} ${s.menu
@@ -44,7 +44,7 @@ export function Discover() {
               .includes(query.toLowerCase()),
         )
         .sort((a, b) => (sort === 'fastest' ? a.eta - b.eta : Number(b.open) - Number(a.open))),
-    [s.restaurants, s.menu, s.serviceArea, cuisine, veg, query, sort],
+    [s.restaurants, s.menu, s.serviceAreas, cuisine, veg, query, sort],
   );
   if (s.loading) return <Loading />;
   return (
@@ -96,7 +96,7 @@ export function Discover() {
           <h2>What are you craving?</h2>
         </div>
         <span className="location-note">
-          <MapPin size={16} /> {s.serviceArea.name} · {s.serviceArea.radius_km} km service area
+          <MapPin size={16} /> {s.serviceAreas.map((a) => a.name).join(' · ')}
         </span>
       </div>
       <div className="search-row">
@@ -230,7 +230,7 @@ export function RestaurantMenu({ slug }: { slug: string }) {
         />
       </div>
     );
-  const accepting = r.open && inServiceArea(r, s.serviceArea);
+  const accepting = r.open && inServiceAreas(r, s.serviceAreas);
   const items = s.menu.filter((m) => m.restaurant_id === r.id);
   const shown = items.filter(
     (m) => (category === 'All' || m.category === category) && (!veg || m.veg),
@@ -262,7 +262,7 @@ export function RestaurantMenu({ slug }: { slug: string }) {
             <MapPin size={14} /> {r.address} · Hours: {r.hours}
           </p>
           <span className={`pill ${r.open ? 'green' : 'neutral'}`}>
-            {!inServiceArea(r, s.serviceArea)
+            {!inServiceAreas(r, s.serviceAreas)
               ? 'Outside the current service area'
               : r.open
                 ? 'Taking orders now'

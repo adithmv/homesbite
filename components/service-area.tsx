@@ -2,10 +2,16 @@
 import { FormEvent, useState } from 'react';
 import { useStore } from './store';
 import { LocationPicker } from './location-picker';
-import { inServiceArea, validateServiceArea } from '@/lib/domain';
+import { DeliveryMap } from './map';
+import { AsyncButton } from './ui';
+import { inServiceAreas, validateServiceArea } from '@/lib/domain';
 export function ServiceAreaSettings() {
   const s = useStore();
-  const [area, setArea] = useState({ ...s.serviceArea });
+  const [area, setArea] = useState({
+    ...s.serviceAreas[0],
+    id: s.serviceAreas[0].id as string | undefined,
+  });
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -15,7 +21,11 @@ export function ServiceAreaSettings() {
     Math.abs(area.lng) <= 180 &&
     area.radius_km >= 1 &&
     area.radius_km <= 100;
-  const excluded = valid ? s.restaurants.filter((r) => !inServiceArea(r, area)) : [];
+  const excluded = valid
+    ? s.restaurants.filter(
+        (r) => !inServiceAreas(r, [...s.serviceAreas.filter((a) => a.id !== area.id), area]),
+      )
+    : [];
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
@@ -25,6 +35,7 @@ export function ServiceAreaSettings() {
       validateServiceArea(area);
       await s.saveServiceArea(area);
       setSaved(true);
+      if (!area.id) setArea({ ...s.serviceArea, name: '', id: undefined });
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Could not save the service area.');
     } finally {
@@ -32,99 +43,180 @@ export function ServiceAreaSettings() {
     }
   }
   return (
-    <form className="panel management-form" onSubmit={submit} onChange={() => setSaved(false)}>
-      <h2>Service area</h2>
-      <p className="muted">
-        Choose the centre and how far HomeBite delivers. Click the map to move the centre, or enter
-        its coordinates.
-      </p>
-      <label>
-        Area name
-        <input
-          required
-          maxLength={80}
-          value={area.name}
-          onChange={(e) => setArea({ ...area, name: e.target.value })}
-          placeholder="e.g. Kochi"
+    <div className="service-areas">
+      <section className="panel">
+        <h2>Delivery locations</h2>
+        <p className="muted">
+          Add areas one by one. Each area has its own centre and delivery radius.
+        </p>
+        <DeliveryMap
+          key={JSON.stringify(s.serviceAreas)}
+          markers={s.serviceAreas.map((a) => ({ ...a, label: a.name, radiusKm: a.radius_km }))}
         />
-      </label>
-      <LocationPicker
-        point={{ lat: area.lat, lng: area.lng }}
-        radiusKm={valid ? area.radius_km : undefined}
-        label={area.name || 'Service area centre'}
-        onSelect={(point) => {
-          setArea((current) => ({ ...current, ...point }));
-          setSaved(false);
-        }}
-        onDetails={(place) =>
-          setArea((current) =>
-            current.lat === place.lat && current.lng === place.lng
-              ? { ...current, name: place.region }
-              : current,
-          )
-        }
-      />
-      <div className="form-grid">
-        <label>
-          Centre latitude
-          <input
-            type="number"
-            required
-            min={-90}
-            max={90}
-            step="any"
-            value={Number.isNaN(area.lat) ? '' : area.lat}
-            onChange={(e) => setArea({ ...area, lat: e.target.valueAsNumber })}
-          />
-        </label>
-        <label>
-          Centre longitude
-          <input
-            type="number"
-            required
-            min={-180}
-            max={180}
-            step="any"
-            value={Number.isNaN(area.lng) ? '' : area.lng}
-            onChange={(e) => setArea({ ...area, lng: e.target.valueAsNumber })}
-          />
-        </label>
-        <label>
-          Delivery radius (km)
-          <input
-            type="number"
-            required
-            min={1}
-            max={100}
-            step="any"
-            value={Number.isNaN(area.radius_km) ? '' : area.radius_km}
-            onChange={(e) => setArea({ ...area, radius_km: e.target.valueAsNumber })}
-          />
-        </label>
-      </div>
-      <p className="small muted">
-        Radius is measured in a straight line, not road distance. It also sets the maximum
-        rider-to-kitchen distance for new assignments. Existing orders are not cancelled.
-      </p>
-      {valid && excluded.length > 0 && (
-        <div className="hint">
-          {excluded.length} kitchen{excluded.length === 1 ? ' is' : 's are'} outside this area and
-          will not accept new orders: {excluded.map((r) => r.name).join(', ')}.
+        <div className="area-list">
+          {s.serviceAreas.map((a) => (
+            <article className="area-card" key={a.id}>
+              <div>
+                <strong>{a.name}</strong>
+                <p className="small muted">
+                  {a.radius_km} km radius · {a.lat.toFixed(5)}, {a.lng.toFixed(5)}
+                </p>
+              </div>
+              <div className="row-actions">
+                <button
+                  type="button"
+                  className="button secondary small"
+                  onClick={() => {
+                    setArea(a);
+                    setSaved(false);
+                    setError('');
+                  }}
+                >
+                  Edit {a.name}
+                </button>
+                {deleting === a.id ? (
+                  <>
+                    <AsyncButton
+                      className="button danger small"
+                      action={async () => {
+                        await s.deleteServiceArea(a.id);
+                        setDeleting(null);
+                        if (area.id === a.id)
+                          setArea({ ...s.serviceArea, name: '', id: undefined });
+                      }}
+                    >
+                      Confirm delete
+                    </AsyncButton>
+                    <button type="button" className="text-button" onClick={() => setDeleting(null)}>
+                      Keep
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    disabled={s.serviceAreas.length <= 1}
+                    onClick={() => setDeleting(a.id)}
+                  >
+                    Delete {a.name}
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
         </div>
-      )}
-      {error && (
-        <p className="field-error" role="alert">
-          {error}
+        <button
+          type="button"
+          className="button"
+          onClick={() => {
+            setArea({ ...s.serviceArea, name: '', id: undefined });
+            setSaved(false);
+            setError('');
+          }}
+        >
+          Add another location
+        </button>
+        <p className="small muted">
+          Keep at least one area. Deleting an area stops new orders there; existing deliveries
+          continue.
         </p>
-      )}
-      {saved && (
-        <p className="success" role="status">
-          Service area saved. New orders now use these boundaries.
+      </section>
+      <form className="panel management-form" onSubmit={submit} onChange={() => setSaved(false)}>
+        <h2>{area.id ? `Edit ${area.name || 'location'}` : 'Add a location'}</h2>
+        <p className="muted">
+          Choose the centre and how far HomeBite delivers. Click the map to move the centre, or
+          enter its coordinates.
         </p>
-      )}
-      <button className="button" disabled={busy || !valid} type="submit">
-        {busy ? 'Saving…' : 'Save service area'}
-      </button>
-    </form>
+        <label>
+          Area name
+          <input
+            required
+            maxLength={80}
+            value={area.name}
+            onChange={(e) => setArea({ ...area, name: e.target.value })}
+            placeholder="e.g. Kochi"
+          />
+        </label>
+        <LocationPicker
+          key={area.id || 'new'}
+          point={{ lat: area.lat, lng: area.lng }}
+          radiusKm={valid ? area.radius_km : undefined}
+          label={area.name || 'Service area centre'}
+          onSelect={(point) => {
+            setArea((current) => ({ ...current, ...point }));
+            setSaved(false);
+          }}
+          onDetails={(place) =>
+            setArea((current) =>
+              current.lat === place.lat && current.lng === place.lng
+                ? { ...current, name: place.region }
+                : current,
+            )
+          }
+        />
+        <div className="form-grid">
+          <label>
+            Centre latitude
+            <input
+              type="number"
+              required
+              min={-90}
+              max={90}
+              step="any"
+              value={Number.isNaN(area.lat) ? '' : area.lat}
+              onChange={(e) => setArea({ ...area, lat: e.target.valueAsNumber })}
+            />
+          </label>
+          <label>
+            Centre longitude
+            <input
+              type="number"
+              required
+              min={-180}
+              max={180}
+              step="any"
+              value={Number.isNaN(area.lng) ? '' : area.lng}
+              onChange={(e) => setArea({ ...area, lng: e.target.valueAsNumber })}
+            />
+          </label>
+          <label>
+            Delivery radius (km)
+            <input
+              type="number"
+              required
+              min={1}
+              max={100}
+              step="any"
+              value={Number.isNaN(area.radius_km) ? '' : area.radius_km}
+              onChange={(e) => setArea({ ...area, radius_km: e.target.valueAsNumber })}
+            />
+          </label>
+        </div>
+        <p className="small muted">
+          Radius is measured in a straight line, not road distance. It also sets the maximum
+          rider-to-kitchen distance for new assignments. Existing orders are not cancelled.
+        </p>
+        {valid && excluded.length > 0 && (
+          <div className="hint">
+            {excluded.length} kitchen{excluded.length === 1 ? ' is' : 's are'} outside all
+            configured areas and will not accept new orders:{' '}
+            {excluded.map((r) => r.name).join(', ')}.
+          </div>
+        )}
+        {error && (
+          <p className="field-error" role="alert">
+            {error}
+          </p>
+        )}
+        {saved && (
+          <p className="success" role="status">
+            Service area saved. New orders now use these boundaries.
+          </p>
+        )}
+        <button className="button" disabled={busy || !valid} type="submit">
+          {busy ? 'Saving…' : area.id ? 'Save service area' : 'Add location'}
+        </button>
+      </form>
+    </div>
   );
 }
