@@ -61,12 +61,14 @@ begin
   -- Use extensions.crypt and extensions.gen_salt for pgcrypto
   v_password_hash := extensions.crypt(p_password, extensions.gen_salt('bf', 10));
 
+  v_user_id := gen_random_uuid();
+
   insert into auth.users (
-    instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+    id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
     raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
     confirmation_token, email_change, email_change_token_new, recovery_token
   ) values (
-    '00000000-0000-0000-0000-000000000000',
+    v_user_id, '00000000-0000-0000-0000-000000000000',
     'authenticated', 'authenticated', lower(p_email), v_password_hash, now(),
     jsonb_build_object('provider', 'email', 'providers', array['email']),
     jsonb_build_object(
@@ -76,7 +78,7 @@ begin
       'vehicle', p_vehicle
     ),
     now(), now(), '', '', '', ''
-  ) returning id into v_user_id;
+  );
 
   if p_role = 'restaurant' then
     insert into public.restaurants (

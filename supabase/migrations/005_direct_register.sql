@@ -72,8 +72,12 @@ begin
   -- Hash password using pgcrypto (bcrypt) in extensions schema
   v_password_hash := extensions.crypt(p_password, extensions.gen_salt('bf', 10));
 
+  -- Generate user UUID
+  v_user_id := gen_random_uuid();
+
   -- Insert into auth.users with email pre-confirmed
   insert into auth.users (
+    id,
     instance_id,
     aud,
     role,
@@ -89,6 +93,7 @@ begin
     email_change_token_new,
     recovery_token
   ) values (
+    v_user_id,
     '00000000-0000-0000-0000-000000000000',
     'authenticated',
     'authenticated',
@@ -108,7 +113,7 @@ begin
     '',
     '',
     ''
-  ) returning id into v_user_id;
+  );
 
   -- The trigger on_auth_user_created will create the profile and rider row.
   -- For restaurant, we also create the restaurant record here (auto-approved).
