@@ -191,7 +191,7 @@ export function Gate({ role, children }: { role: Role; children: ReactNode }) {
         ) : (
           <Link
             className="button center"
-            href={`/login?role=${role === 'admin' ? 'customer' : role}`}
+            href={role === 'admin' ? '/admin/login' : `/login?role=${role}`}
           >
             Sign in
             <ArrowRight size={16} />
