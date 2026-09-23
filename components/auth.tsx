@@ -325,7 +325,13 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
           {mode !== 'new-password' && (
             <label>
               Email
-              <input name="email" type="email" required autoComplete="email" />
+              <input
+                name="email"
+                type="email"
+                required
+                autoComplete="email"
+                defaultValue={process.env.NODE_ENV === 'development' && mode === 'login' ? 'agronilife@gmail.com' : undefined}
+              />
             </label>
           )}
           {mode !== 'reset' && (
@@ -337,6 +343,7 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
                 required
                 minLength={mode === 'login' ? 1 : 8}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                defaultValue={process.env.NODE_ENV === 'development' && mode === 'login' ? 'Admin..123456' : undefined}
               />
               {(mode !== 'login' && mode !== 'quick-register') && <small className="muted">Use at least 12 characters.</small>}
               {(mode === 'quick-register') && <small className="muted">Use at least 8 characters.</small>}
