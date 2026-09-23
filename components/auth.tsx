@@ -257,7 +257,7 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
           {((mode === 'signup') || (mode === 'quick-register')) && (
             <>
               <label>
-                I'm here to
+                I&apos;m here to
                 <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
                   <option value="customer">Order food</option>
                   <option value="restaurant">Run a kitchen</option>

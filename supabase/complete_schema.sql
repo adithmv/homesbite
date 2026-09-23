@@ -149,7 +149,10 @@ $$;
 
 create function private.new_user() returns trigger language plpgsql security definer set search_path = '' as $$
 declare chosen public.app_role; begin
-  chosen := case when new.raw_user_meta_data->>'role' in ('restaurant','rider') then (new.raw_user_meta_data->>'role')::public.app_role else 'customer' end;
+  chosen := case
+    when new.raw_user_meta_data->>'role' in ('restaurant','rider') then (new.raw_user_meta_data->>'role')::public.app_role
+    else 'customer'
+  end;
   insert into public.profiles(id,name,phone,role) values(new.id, left(coalesce(nullif(trim(new.raw_user_meta_data->>'name'),''),'Customer'),100), new.raw_user_meta_data->>'phone', chosen);
   if chosen = 'rider' then
     insert into public.riders(id,name,phone,vehicle) values(new.id, left(new.raw_user_meta_data->>'name',100),new.raw_user_meta_data->>'phone',coalesce(new.raw_user_meta_data->>'vehicle','Bike'));
@@ -782,8 +785,8 @@ begin
   if p_phone is null or p_phone !~ '^[6-9][0-9]{9}$' then
     raise exception 'Valid 10-digit Indian mobile number required';
   end if;
-  if p_role not in ('customer','restaurant','rider') then
-    raise exception 'Role must be customer, restaurant, or rider';
+  if p_role not in ('customer','restaurant','rider','admin') then
+    raise exception 'Role must be customer, restaurant, rider, or admin';
   end if;
 
   if exists(select 1 from auth.users where email = lower(p_email)) then
@@ -805,7 +808,7 @@ begin
     end if;
   end if;
 
-  v_password_hash := crypt(p_password, gen_salt('bf', 10));
+  v_password_hash := extensions.crypt(p_password, extensions.gen_salt('bf', 10));
 
   insert into auth.users (
     instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -830,7 +833,7 @@ begin
     ) values (
       v_user_id,
       trim(p_name) || '''s Kitchen',
-      lower(regexp_replace(trim(p_name), '[^a-z0-9]+', '-', 'g')) || '-' || substr(v_user_id::text, 1, 6),
+      coalesce(nullif(trim(both '-' from lower(regexp_replace(trim(p_name), '[^a-z0-9]+', '-', 'g'))), ''), 'kitchen') || '-' || substr(v_user_id::text, 1, 6),
       'Freshly prepared meals from our neighbourhood kitchen.',
       'Indian',
       'Address to be updated',

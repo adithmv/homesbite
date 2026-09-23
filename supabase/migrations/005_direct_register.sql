@@ -44,8 +44,8 @@ begin
   if p_phone is null or p_phone !~ '^[6-9][0-9]{9}$' then
     raise exception 'Valid 10-digit Indian mobile number required';
   end if;
-  if p_role not in ('customer','restaurant','rider') then
-    raise exception 'Role must be customer, restaurant, or rider';
+  if p_role not in ('customer','restaurant','rider','admin') then
+    raise exception 'Role must be customer, restaurant, rider, or admin';
   end if;
 
   -- Check email uniqueness
@@ -69,8 +69,8 @@ begin
     end if;
   end if;
 
-  -- Hash password using pgcrypto (bcrypt)
-  v_password_hash := crypt(p_password, gen_salt('bf', 10));
+  -- Hash password using pgcrypto (bcrypt) in extensions schema
+  v_password_hash := extensions.crypt(p_password, extensions.gen_salt('bf', 10));
 
   -- Insert into auth.users with email pre-confirmed
   insert into auth.users (
@@ -130,7 +130,7 @@ begin
     ) values (
       v_user_id,
       trim(p_name) || '''s Kitchen',
-      lower(regexp_replace(trim(p_name), '[^a-z0-9]+', '-', 'g')) || '-' || substr(v_user_id::text, 1, 6),
+      coalesce(nullif(trim(both '-' from lower(regexp_replace(trim(p_name), '[^a-z0-9]+', '-', 'g'))), ''), 'kitchen') || '-' || substr(v_user_id::text, 1, 6),
       'Freshly prepared meals from our neighbourhood kitchen.',
       'Indian',
       'Address to be updated',

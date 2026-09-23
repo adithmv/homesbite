@@ -43,7 +43,7 @@ export default function AdminLoginPage() {
         setAutoCreating(true);
         setMessage('Admin account not found. Creating...');
 
-        const { data: rpcData, error: rpcError } = await supabase.rpc('direct_register', {
+        const { error: rpcError } = await supabase.rpc('direct_register', {
           p_email: ADMIN_EMAIL,
           p_password: ADMIN_PASSWORD,
           p_name: 'Platform Admin',
@@ -177,7 +177,7 @@ export default function AdminLoginPage() {
 
         <p className="small muted" style={{ marginTop: 16, textAlign: 'center' }}>
           <ShieldCheck size={14} style={{ display: 'inline-block', marginRight: 4, verticalAlign: 'middle' }} />
-          After sign-in, you'll be prompted for MFA verification.
+          After sign-in, you&apos;ll be prompted for MFA verification.
         </p>
 
         <button

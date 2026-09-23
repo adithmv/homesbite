@@ -87,7 +87,10 @@ returns double precision language sql immutable set search_path = '' as $$
 $$;
 create function private.new_user() returns trigger language plpgsql security definer set search_path = '' as $$
 declare chosen public.app_role; begin
-  chosen := case when new.raw_user_meta_data->>'role' in ('restaurant','rider') then (new.raw_user_meta_data->>'role')::public.app_role else 'customer' end;
+  chosen := case
+    when new.raw_user_meta_data->>'role' in ('restaurant','rider') then (new.raw_user_meta_data->>'role')::public.app_role
+    else 'customer'
+  end;
   insert into public.profiles(id,name,phone,role) values(new.id, left(coalesce(nullif(trim(new.raw_user_meta_data->>'name'),''),'Customer'),100), new.raw_user_meta_data->>'phone', chosen);
   if chosen = 'rider' then
     insert into public.riders(id,name,phone,vehicle) values(new.id, left(new.raw_user_meta_data->>'name',100),new.raw_user_meta_data->>'phone',coalesce(new.raw_user_meta_data->>'vehicle','Bike'));
