@@ -49,11 +49,21 @@ begin
   end if;
 
   -- Check email uniqueness
-  if exists(select 1 from auth.users where email = lower(p_email)) then
-    raise exception 'An account with this email already exists';
+  -- If user already exists with this email, return existing user ID
+  select id into v_user_id from auth.users where email = lower(p_email);
+  if v_user_id is not null then
+    return v_user_id;
   end if;
-  if exists(select 1 from public.profiles where phone = p_phone) then
-    raise exception 'An account with this phone number already exists';
+
+  -- If phone exists, clean up orphaned profile or return existing user ID
+  select id into v_user_id from public.profiles where phone = p_phone;
+  if v_user_id is not null then
+    if not exists (select 1 from auth.users where id = v_user_id) then
+      delete from public.profiles where id = v_user_id;
+      v_user_id := null;
+    else
+      return v_user_id;
+    end if;
   end if;
 
   -- For restaurant/rider: verify location is in service area
