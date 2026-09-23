@@ -2,7 +2,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Zap } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Role, inServiceAreas, Point } from '@/lib/domain';
 import { LocationPicker } from './location-picker';
@@ -13,7 +13,7 @@ import { Captcha } from './captcha';
 export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
   const s = useStore(),
     router = useRouter();
-  const [mode, setMode] = useState<'login' | 'signup' | 'reset' | 'new-password'>('login'),
+  const [mode, setMode] = useState<'login' | 'signup' | 'reset' | 'new-password' | 'quick-register'>('login'),
     [role, setRole] = useState<Role>(initialRole),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
@@ -59,6 +59,52 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
         if (error) throw error;
         setMessage('Password updated. You can sign in with your new password.');
         setMode('login');
+        return;
+      }
+      if (mode === 'quick-register') {
+        const name = String(f.get('name'));
+        const phone = String(f.get('phone'));
+        const vehicle = String(f.get('vehicle') || 'Bike');
+        const lat = registrationPoint?.lat;
+        const lng = registrationPoint?.lng;
+        if (
+          role === 'restaurant' &&
+          (!registrationPoint || !inServiceAreas(registrationPoint, s.serviceAreas))
+        )
+          throw new Error(
+            'Select a kitchen location inside the service area before creating your account.',
+          );
+        if (
+          role === 'rider' &&
+          (!registrationPoint || !inServiceAreas(registrationPoint, s.serviceAreas))
+        )
+          throw new Error(
+            'Select your location inside the service area before creating your account.',
+          );
+        const response = await fetch('/api/auth/direct-register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, name, phone, role, vehicle, lat, lng }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Registration failed');
+        if (result.session) {
+          // Set the session in Supabase client
+          await supabase.auth.setSession({
+            access_token: result.session.access_token,
+            refresh_token: result.session.refresh_token,
+          });
+        }
+        await s.refresh();
+        router.push(
+          role === 'restaurant'
+            ? '/restaurant'
+            : role === 'rider'
+              ? '/rider'
+              : s.cart.length
+                ? '/checkout'
+                : '/',
+        );
         return;
       }
       if (mode === 'signup') {
@@ -162,14 +208,18 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
               ? 'Choose a new password.'
               : mode === 'signup'
                 ? 'Make yourself at home.'
-                : 'Welcome back.'}
+                : mode === 'quick-register'
+                  ? 'Quick register — instant access'
+                  : 'Welcome back.'}
         </h1>
         <p className="muted">
           {mode === 'signup'
             ? 'Fresh meals and neighbourhood favourites await.'
-            : 'Sign in to your HomeBite account.'}
+            : mode === 'quick-register'
+              ? 'No email verification, no CAPTCHA, no admin approval wait.'
+              : 'Sign in to your HomeBite account.'}
         </p>
-        {(mode === 'login' || mode === 'signup') && (
+        {(mode === 'login' || mode === 'signup' || mode === 'quick-register') && (
           <div className="auth-tabs">
             <button
               className={mode === 'login' ? 'active' : ''}
@@ -189,15 +239,25 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
                 setMessage('');
               }}
             >
-              Create account
+              Create account (email verify)
+            </button>
+            <button
+              className={mode === 'quick-register' ? 'active' : ''}
+              onClick={() => {
+                setMode('quick-register');
+                setError('');
+                setMessage('');
+              }}
+            >
+              <Zap size={16} /> Quick register
             </button>
           </div>
         )}
         <form onSubmit={submit}>
-          {mode === 'signup' && (
+          {((mode === 'signup') || (mode === 'quick-register')) && (
             <>
               <label>
-                I’m here to
+                I'm here to
                 <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
                   <option value="customer">Order food</option>
                   <option value="restaurant">Run a kitchen</option>
@@ -233,10 +293,10 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
               )}
             </>
           )}
-          {mode === 'signup' && (
+          {((mode === 'signup') || (mode === 'quick-register')) && (
             <div>
               <h3>
-                {role === 'restaurant' ? 'Kitchen location (required)' : 'Your location (optional)'}
+                {role === 'restaurant' ? 'Kitchen location (required)' : role === 'rider' ? 'Your location (required)' : 'Your location (optional)'}
               </h3>
               <LocationPicker
                 point={registrationPoint || s.serviceArea}
@@ -253,9 +313,10 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
                   {registrationPoint.lng.toFixed(6)}
                 </p>
               )}
-              {role === 'restaurant' && (
+              {(role === 'restaurant' || role === 'rider') && (
                 <p className="small muted">
-                  Choose your actual kitchen pickup location. Available service areas:{' '}
+                  Choose your actual {' '}
+                  {role === 'restaurant' ? 'kitchen pickup' : 'home/base'} location. Available service areas:{' '}
                   {s.serviceAreas.map((a) => a.name).join(', ')}.
                 </p>
               )}
@@ -274,13 +335,14 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
                 name="password"
                 type="password"
                 required
-                minLength={mode === 'login' ? 1 : 12}
+                minLength={mode === 'login' ? 1 : 8}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               />
-              {mode !== 'login' && <small className="muted">Use at least 12 characters.</small>}
+              {(mode !== 'login' && mode !== 'quick-register') && <small className="muted">Use at least 12 characters.</small>}
+              {(mode === 'quick-register') && <small className="muted">Use at least 8 characters.</small>}
             </label>
           )}
-          {captchaEnabled && mode !== 'new-password' && (
+          {captchaEnabled && mode !== 'new-password' && mode !== 'quick-register' && (
             <Captcha key={`${mode}-${captchaAttempt}`} onToken={setCaptchaToken} />
           )}
           {error && (
@@ -300,9 +362,11 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
                 ? 'Sign in'
                 : mode === 'signup'
                   ? 'Create account'
-                  : mode === 'reset'
-                    ? 'Send reset link'
-                    : 'Update password'}
+                  : mode === 'quick-register'
+                    ? 'Quick register'
+                    : mode === 'reset'
+                      ? 'Send reset link'
+                      : 'Update password'}
             <ArrowRight size={16} />
           </button>
         </form>
@@ -326,6 +390,13 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
           <p className="small muted auth-back">
             Kitchen and rider accounts require admin approval before going live. By creating an
             account, you accept the <Link href="/policies">platform policies</Link>.
+          </p>
+        )}
+        {mode === 'quick-register' && (
+          <p className="small muted auth-back">
+            <Zap size={14} /> Quick register: no email verification, no CAPTCHA, instant access.
+            Kitchen & rider accounts are auto-approved. By registering, you accept the
+            <Link href="/policies">platform policies</Link>.
           </p>
         )}
       </div>
