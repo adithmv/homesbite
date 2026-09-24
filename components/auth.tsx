@@ -356,7 +356,6 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
                 required
                 autoComplete="email"
                 placeholder="name@example.com"
-                defaultValue={process.env.NODE_ENV === 'development' && mode === 'login' ? 'agronilife@gmail.com' : undefined}
               />
             </label>
           )}
@@ -370,7 +369,6 @@ export function Login({ initialRole = 'customer' }: { initialRole?: Role }) {
                 required
                 minLength={6}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                defaultValue={process.env.NODE_ENV === 'development' && mode === 'login' ? 'Admin..123456' : undefined}
               />
               {mode === 'signup' && (
                 <small className="muted">Use at least 6 characters.</small>
