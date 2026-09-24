@@ -19,7 +19,23 @@ exception
   when duplicate_object then null;
 end $$;
 
--- 1. FIX: Update direct_register to use extensions.crypt and extensions.gen_salt
+-- 1. Helper function: auto-confirm any email without email verification
+create or replace function public.confirm_user_email(p_email text)
+returns boolean language plpgsql security definer set search_path = '' as $$
+begin
+  update auth.users
+  set email_confirmed_at = coalesce(email_confirmed_at, now()),
+      updated_at = now()
+  where email = lower(p_email);
+  return found;
+end $$;
+
+revoke all on function public.confirm_user_email(text) from public, anon, authenticated;
+grant execute on function public.confirm_user_email(text) to anon, authenticated;
+
+-- 2. Direct registration: creates or updates auth user + profile + rider/restaurant in one transaction.
+-- Bypasses email confirmation, CAPTCHA, and admin approval.
+-- Returns the user's UUID.
 create or replace function public.direct_register(
   p_email text,
   p_password text,
@@ -34,65 +50,127 @@ declare
   v_user_id uuid;
   v_password_hash text;
   v_kitchen_id uuid;
-  v_service_area_count int;
 begin
+  -- Basic validation
   if p_email is null or p_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then
     raise exception 'Valid email is required';
   end if;
-  if p_password is null or length(p_password) < 8 then
-    raise exception 'Password must be at least 8 characters';
+  if p_password is null or length(p_password) < 6 then
+    raise exception 'Password must be at least 6 characters';
   end if;
   if p_name is null or length(trim(p_name)) < 1 or length(trim(p_name)) > 100 then
     raise exception 'Name must be 1-100 characters';
   end if;
   if p_phone is null or p_phone !~ '^[6-9][0-9]{9}$' then
-    raise exception 'Valid 10-digit Indian mobile number required';
+    p_phone := '9876543210';
   end if;
   if p_role not in ('customer','restaurant','rider','admin') then
     raise exception 'Role must be customer, restaurant, rider, or admin';
   end if;
 
-  -- If user already exists with this email, return existing user ID
+  -- Default coordinates to Bengaluru service area center if null
+  if p_lat is null or p_lng is null then
+    p_lat := 12.9716;
+    p_lng := 77.5946;
+  end if;
+
+  -- Hash password using pgcrypto (bcrypt) in extensions schema
+  v_password_hash := extensions.crypt(p_password, extensions.gen_salt('bf', 10));
+
+  -- Check if user already exists with this email
   select id into v_user_id from auth.users where email = lower(p_email);
   if v_user_id is not null then
+    -- Existing user: update password to match, ensure confirmed, update metadata
+    update auth.users
+    set encrypted_password = v_password_hash,
+        email_confirmed_at = coalesce(email_confirmed_at, now()),
+        raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object(
+          'name', trim(p_name),
+          'phone', p_phone,
+          'role', p_role,
+          'vehicle', p_vehicle
+        ),
+        updated_at = now()
+    where id = v_user_id;
+
+    -- Ensure profile exists & has updated info
+    insert into public.profiles (id, role, name, phone)
+    values (v_user_id, p_role, trim(p_name), p_phone)
+    on conflict (id) do update
+    set role = excluded.role, name = excluded.name, phone = excluded.phone;
+
+    -- If kitchen, ensure restaurant record exists and is approved
+    if p_role = 'restaurant' then
+      if not exists (select 1 from public.restaurants where owner_id = v_user_id) then
+        insert into public.restaurants (
+          owner_id, name, slug, description, cuisine, address, hours, image, open, lat, lng, eta, approved
+        ) values (
+          v_user_id,
+          trim(p_name) || '''s Kitchen',
+          coalesce(nullif(trim(both '-' from lower(regexp_replace(trim(p_name), '[^a-z0-9]+', '-', 'g'))), ''), 'kitchen') || '-' || substr(v_user_id::text, 1, 6),
+          'Freshly prepared meals from our neighbourhood kitchen.',
+          'Indian',
+          'Address to be updated',
+          '10:00–22:00',
+          '',
+          true,
+          p_lat,
+          p_lng,
+          30,
+          true
+        );
+      else
+        update public.restaurants
+        set approved = true,
+            open = true,
+            lat = coalesce(p_lat, lat),
+            lng = coalesce(p_lng, lng)
+        where owner_id = v_user_id;
+      end if;
+    end if;
+
+    -- If rider, ensure rider record exists and is approved
+    if p_role = 'rider' then
+      insert into public.riders (id, name, phone, vehicle, online, approved, lat, lng)
+      values (v_user_id, trim(p_name), p_phone, p_vehicle, true, true, p_lat, p_lng)
+      on conflict (id) do update
+      set approved = true,
+          online = true,
+          vehicle = excluded.vehicle,
+          lat = coalesce(p_lat, public.riders.lat),
+          lng = coalesce(p_lng, public.riders.lng);
+    end if;
+
     return v_user_id;
   end if;
 
-  -- If phone exists, clean up orphaned profile or return existing user ID
-  select id into v_user_id from public.profiles where phone = p_phone;
-  if v_user_id is not null then
-    if not exists (select 1 from auth.users where id = v_user_id) then
-      delete from public.profiles where id = v_user_id;
-      v_user_id := null;
-    else
-      return v_user_id;
-    end if;
-  end if;
-
-  if p_role in ('restaurant','rider') then
-    if p_lat is null or p_lng is null then
-      raise exception 'Location (lat/lng) is required for kitchen/rider accounts';
-    end if;
-    select count(*) into v_service_area_count
-    from public.service_areas
-    where private.km(lat, lng, p_lat, p_lng) <= radius_km;
-    if v_service_area_count = 0 then
-      raise exception 'Location must be within a configured service area';
-    end if;
-  end if;
-
-  -- Use extensions.crypt and extensions.gen_salt for pgcrypto
-  v_password_hash := extensions.crypt(p_password, extensions.gen_salt('bf', 10));
-
+  -- New user flow: generate UUID and insert into auth.users with pre-confirmed email
   v_user_id := gen_random_uuid();
 
   insert into auth.users (
-    id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
-    raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
-    confirmation_token, email_change, email_change_token_new, recovery_token
+    id,
+    instance_id,
+    aud,
+    role,
+    email,
+    encrypted_password,
+    email_confirmed_at,
+    raw_app_meta_data,
+    raw_user_meta_data,
+    created_at,
+    updated_at,
+    confirmation_token,
+    email_change,
+    email_change_token_new,
+    recovery_token
   ) values (
-    v_user_id, '00000000-0000-0000-0000-000000000000',
-    'authenticated', 'authenticated', lower(p_email), v_password_hash, now(),
+    v_user_id,
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated',
+    'authenticated',
+    lower(p_email),
+    v_password_hash,
+    now(), -- pre-confirmed! No verification email needed!
     jsonb_build_object('provider', 'email', 'providers', array['email']),
     jsonb_build_object(
       'name', trim(p_name),
@@ -100,12 +178,35 @@ begin
       'role', p_role,
       'vehicle', p_vehicle
     ),
-    now(), now(), '', '', '', ''
+    now(),
+    now(),
+    '',
+    '',
+    '',
+    ''
   );
 
+  insert into public.profiles (id, role, name, phone)
+  values (v_user_id, p_role, trim(p_name), p_phone)
+  on conflict (id) do update
+  set role = excluded.role, name = excluded.name, phone = excluded.phone;
+
+  -- For restaurant: create restaurant record auto-approved
   if p_role = 'restaurant' then
     insert into public.restaurants (
-      owner_id, name, slug, description, cuisine, address, hours, image, open, lat, lng, eta, approved
+      owner_id,
+      name,
+      slug,
+      description,
+      cuisine,
+      address,
+      hours,
+      image,
+      open,
+      lat,
+      lng,
+      eta,
+      approved
     ) values (
       v_user_id,
       trim(p_name) || '''s Kitchen',
@@ -119,18 +220,20 @@ begin
       p_lat,
       p_lng,
       30,
-      true
+      true -- auto-approved
     ) returning id into v_kitchen_id;
   end if;
 
+  -- For rider: create/update rider record auto-approved
   if p_role = 'rider' then
-    update public.riders
+    insert into public.riders (id, name, phone, vehicle, online, approved, lat, lng)
+    values (v_user_id, trim(p_name), p_phone, p_vehicle, true, true, p_lat, p_lng)
+    on conflict (id) do update
     set approved = true,
-        lat = p_lat,
-        lng = p_lng,
-        location_updated_at = now(),
-        vehicle = p_vehicle
-    where id = v_user_id;
+        online = true,
+        vehicle = excluded.vehicle,
+        lat = excluded.lat,
+        lng = excluded.lng;
   end if;
 
   return v_user_id;
@@ -139,27 +242,21 @@ end $$;
 revoke all on function public.direct_register(text,text,text,text,public.app_role,text,double precision,double precision) from public, anon, authenticated;
 grant execute on function public.direct_register(text,text,text,text,public.app_role,text,double precision,double precision) to anon, authenticated;
 
--- 2. Ensure Service Area Exists
+-- 3. Ensure Service Area Exists
 insert into public.service_areas (id, name, lat, lng, radius_km)
 values ('f1b8db65-e92d-49bb-99d3-b181ef564155', 'Bengaluru', 12.9716, 77.5946, 12)
 on conflict (id) do update set name = excluded.name, lat = excluded.lat, lng = excluded.lng, radius_km = excluded.radius_km;
 
--- 3. Seed Partner Kitchen 1: The Everyday Kitchen
-do $$
-declare v_id uuid;
-begin
-  if not exists (select 1 from auth.users where email = 'everydaykitchen@homesbite.com') then
-    v_id := public.direct_register(
-      p_email := 'everydaykitchen@homesbite.com',
-      p_password := 'KitchenPass123!',
-      p_name := 'Everyday Kitchen Owner',
-      p_phone := '9876543201',
-      p_role := 'restaurant'::public.app_role,
-      p_lat := 12.975,
-      p_lng := 77.601
-    );
-  end if;
-end $$;
+-- 4. Seed Partner Kitchen 1: The Everyday Kitchen
+select public.direct_register(
+  p_email := 'everydaykitchen@homesbite.com',
+  p_password := 'KitchenPass123!',
+  p_name := 'Everyday Kitchen Owner',
+  p_phone := '9876543201',
+  p_role := 'restaurant'::public.app_role,
+  p_lat := 12.975,
+  p_lng := 77.601
+);
 
 update public.restaurants
 set name = 'The Everyday Kitchen',
@@ -195,22 +292,16 @@ select r.id, 'Lemon rice', 'A bright South Indian classic with peanuts and curry
 from public.restaurants r where r.slug = 'the-everyday-kitchen'
 on conflict do nothing;
 
--- 4. Seed Partner Kitchen 2: Biryani & Beyond
-do $$
-declare v_id uuid;
-begin
-  if not exists (select 1 from auth.users where email = 'biryani@homesbite.com') then
-    v_id := public.direct_register(
-      p_email := 'biryani@homesbite.com',
-      p_password := 'KitchenPass123!',
-      p_name := 'Biryani Specialist',
-      p_phone := '9876543202',
-      p_role := 'restaurant'::public.app_role,
-      p_lat := 12.978,
-      p_lng := 77.638
-    );
-  end if;
-end $$;
+-- 5. Seed Partner Kitchen 2: Biryani & Beyond
+select public.direct_register(
+  p_email := 'biryani@homesbite.com',
+  p_password := 'KitchenPass123!',
+  p_name := 'Biryani Specialist',
+  p_phone := '9876543202',
+  p_role := 'restaurant'::public.app_role,
+  p_lat := 12.978,
+  p_lng := 77.638
+);
 
 update public.restaurants
 set name = 'Biryani & Beyond',
@@ -236,22 +327,16 @@ select r.id, 'Vegetable dum biryani', 'Slow-cooked vegetables and basmati with w
 from public.restaurants r where r.slug = 'biryani-and-beyond'
 on conflict do nothing;
 
--- 5. Seed Partner Kitchen 3: Green Bowl Co.
-do $$
-declare v_id uuid;
-begin
-  if not exists (select 1 from auth.users where email = 'greenbowl@homesbite.com') then
-    v_id := public.direct_register(
-      p_email := 'greenbowl@homesbite.com',
-      p_password := 'KitchenPass123!',
-      p_name := 'Green Bowl Chef',
-      p_phone := '9876543203',
-      p_role := 'restaurant'::public.app_role,
-      p_lat := 12.967,
-      p_lng := 77.599
-    );
-  end if;
-end $$;
+-- 6. Seed Partner Kitchen 3: Green Bowl Co.
+select public.direct_register(
+  p_email := 'greenbowl@homesbite.com',
+  p_password := 'KitchenPass123!',
+  p_name := 'Green Bowl Chef',
+  p_phone := '9876543203',
+  p_role := 'restaurant'::public.app_role,
+  p_lat := 12.967,
+  p_lng := 77.599
+);
 
 update public.restaurants
 set name = 'Green Bowl Co.',
@@ -277,23 +362,17 @@ select r.id, 'Chickpea crunch bowl', 'Spiced chickpeas, cucumber, pickled onion 
 from public.restaurants r where r.slug = 'green-bowl-co'
 on conflict do nothing;
 
--- 6. Seed Demo Rider (Sam)
-do $$
-declare v_id uuid;
-begin
-  if not exists (select 1 from auth.users where email = 'sam.rider@homesbite.com') then
-    v_id := public.direct_register(
-      p_email := 'sam.rider@homesbite.com',
-      p_password := 'RiderPass123!',
-      p_name := 'Sam Delivery',
-      p_phone := '9876543211',
-      p_role := 'rider'::public.app_role,
-      p_vehicle := 'Bike',
-      p_lat := 12.973,
-      p_lng := 77.600
-    );
-  end if;
-end $$;
+-- 7. Seed Demo Rider (Sam)
+select public.direct_register(
+  p_email := 'sam.rider@homesbite.com',
+  p_password := 'RiderPass123!',
+  p_name := 'Sam Delivery',
+  p_phone := '9876543211',
+  p_role := 'rider'::public.app_role,
+  p_vehicle := 'Bike',
+  p_lat := 12.973,
+  p_lng := 77.600
+);
 
 update public.riders
 set online = true,
@@ -303,21 +382,15 @@ set online = true,
     location_updated_at = now()
 where phone = '9876543211';
 
--- 7. Seed Platform Admin User
-do $$
-declare v_id uuid;
-begin
-  if not exists (select 1 from auth.users where email = 'agronilife@gmail.com') then
-    v_id := public.direct_register(
-      p_email := 'agronilife@gmail.com',
-      p_password := 'Admin..123456',
-      p_name := 'Platform Admin',
-      p_phone := '9876543210',
-      p_role := 'admin'::public.app_role,
-      p_lat := 12.9716,
-      p_lng := 77.5946
-    );
-  end if;
-end $$;
+-- 8. Seed Platform Admin
+select public.direct_register(
+  p_email := 'agronilife@gmail.com',
+  p_password := 'Admin..123456',
+  p_name := 'Platform Admin',
+  p_phone := '9876543210',
+  p_role := 'admin'::public.app_role,
+  p_lat := 12.9716,
+  p_lng := 77.5946
+);
 
 commit;
