@@ -6,6 +6,19 @@
 
 begin;
 
+-- Safe Enum Type Creation (no error if already exists)
+do $$ begin
+  create type public.app_role as enum ('customer', 'restaurant', 'rider', 'admin');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type public.order_status as enum ('placed', 'restaurant_accepted', 'preparing', 'ready_for_pickup', 'rider_assigned', 'picked_up', 'delivered', 'cancelled', 'rejected');
+exception
+  when duplicate_object then null;
+end $$;
+
 -- 1. FIX: Update direct_register to use extensions.crypt and extensions.gen_salt
 create or replace function public.direct_register(
   p_email text,

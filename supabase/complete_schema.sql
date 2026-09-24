@@ -15,8 +15,17 @@ create schema if not exists private;
 revoke all on schema private from public;
 grant usage on schema private to authenticated;
 
-create type public.app_role as enum ('customer', 'restaurant', 'rider', 'admin');
-create type public.order_status as enum ('placed', 'restaurant_accepted', 'preparing', 'ready_for_pickup', 'rider_assigned', 'picked_up', 'delivered', 'cancelled', 'rejected');
+do $$ begin
+  create type public.app_role as enum ('customer', 'restaurant', 'rider', 'admin');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type public.order_status as enum ('placed', 'restaurant_accepted', 'preparing', 'ready_for_pickup', 'rider_assigned', 'picked_up', 'delivered', 'cancelled', 'rejected');
+exception
+  when duplicate_object then null;
+end $$;
 
 create table public.profiles (
   id uuid primary key references auth.users on delete cascade,
